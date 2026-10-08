@@ -5,9 +5,10 @@ import {
   Radio, RefreshCw, Shield, ShieldAlert, ShieldCheck, Truck, Users, Zap,
 } from 'lucide-react'
 import { loadIncidents, loadSite } from './api'
+import VideoReview from './VideoReview'
 import type { Actor, Hazard, Incident, SiteSnapshot } from './types'
 
-type View = 'overview' | 'incidents'
+type View = 'overview' | 'incidents' | 'vision'
 type Sample = { tick: number; risks: number }
 
 function formatTime(value: string) {
@@ -200,6 +201,7 @@ export default function App() {
         <nav aria-label="Primary navigation">
           <button className={`nav-item ${view === 'overview' ? 'active' : ''}`} onClick={() => setView('overview')}><LayoutDashboard size={19} /> Overview</button>
           <button className={`nav-item ${view === 'incidents' ? 'active' : ''}`} onClick={() => setView('incidents')}><ShieldAlert size={19} /> Incident log <span className="nav-count">{incidents.length}</span></button>
+          <button className={`nav-item ${view === 'vision' ? 'active' : '' }`} onClick={() => setView('vision')}><ScanSearch size={19} /> Video analysis</button>
         </nav>
         <div className="side-section site-title">MONITORED SITE</div>
         <div className="site-picker"><span className="site-picker-icon"><MapPinned size={17} /></span><div><strong>North Excavation</strong><small>Research site 01</small></div><ChevronDown size={16} /></div>
@@ -209,11 +211,12 @@ export default function App() {
         </div>
       </aside>
       <main className="main">
-        <header className="topbar"><span><span className="topbar-location">Workspace</span><span className="slash">/</span>{view === 'overview' ? 'Overview' : 'Incident log'}</span><div className="topbar-right"><span className="connection"><span className={error ? 'offline-dot' : 'online-dot'} />{error ? 'API DISCONNECTED' : snapshot ? 'API CONNECTED' : 'CONNECTING'}</span><span className="topbar-divider" /><span className="date-label">{new Date().toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}</span></div></header>
+        <header className="topbar"><span><span className="topbar-location">Workspace</span><span className="slash">/</span>{view === 'overview' ? 'Overview' : view === 'vision' ? 'Video analysis' : 'Incident log'}</span><div className="topbar-right"><span className="connection"><span className={error ? 'offline-dot' : 'online-dot'} />{error ? 'API DISCONNECTED' : snapshot ? 'API CONNECTED' : 'CONNECTING'}</span><span className="topbar-divider" /><span className="date-label">{new Date().toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}</span></div></header>
         <div className="page">
-          <div className="heading-row"><div><div className="eyebrow"><span className="eyebrow-line" /> SAFETY OPERATIONS / LIVE MONITORING</div><h1>{view === 'overview' ? 'Site overview' : 'Incident history'}</h1><p className="subtitle">{view === 'overview' ? 'Real-time awareness of worker safety and equipment activity.' : 'Recorded changes in simulated safety events. Newest events appear first.'}</p></div><div className="actions"><button className="btn btn-outline" onClick={() => { void refresh() }}><RefreshCw size={16} /> Refresh</button><button className="btn btn-primary" onClick={() => setRunning(prev => !prev)}>{running ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}{running ? 'Pause updates' : 'Resume updates'}</button></div></div>
+          <div className="heading-row"><div><div className="eyebrow"><span className="eyebrow-line" /> SAFETY OPERATIONS / LIVE MONITORING</div><h1>{view === 'overview' ? 'Site overview' : view === 'vision' ? 'Video analysis' : 'Incident history'}</h1><p className="subtitle">{view === 'overview' ? 'Real-time awareness of worker safety and equipment activity.' : view === 'vision' ? 'Detect and track objects in recorded construction-site footage.' : 'Recorded changes in simulated safety events. Newest events appear first.'}</p></div><div className="actions"><button className="btn btn-outline" onClick={() => { void refresh() }}><RefreshCw size={16} /> Refresh</button><button className="btn btn-primary" onClick={() => setRunning(prev => !prev)}>{running ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}{running ? 'Pause updates' : 'Resume updates'}</button></div></div>
           <div className="demo-notice"><CircleDot size={16} /><div><strong>Research prototype</strong><span> Synthetic trajectories and rule-based hazards. Not a deployed safety device or validated collision predictor.</span></div><span className="notice-tag">DEMO DATA</span></div>
           {error && <div className="error-banner"><AlertTriangle size={18} /><span>{error}. Start the FastAPI backend on port 8000.</span><button onClick={() => { void refresh() }}>Retry</button></div>}
+          {view === 'vision' ? <VideoReview /> : <>
           <section className="metrics-grid" aria-label="Operational metrics">
             <Metric label="Workers on site" value={snapshot?.people_on_site ?? '—'} detail="Simulated personnel" icon={Users} />
             <Metric label="Active equipment" value={snapshot?.equipment_active ?? '—'} detail="Tracked machinery" icon={Truck} />
@@ -249,6 +252,7 @@ export default function App() {
               <div className="table-note"><BellRing size={15} /> Events are recorded when a hazard starts or changes severity, not on every refresh.</div>
             </section>
           )}
+          </>}
           <footer className="footer"><span>© {new Date().getFullYear()} SITEOBSERVER <span className="footer-sep">/</span> RESEARCH PROTOTYPE</span><span><span className="online-dot" /> LOCAL-FIRST · $0 CLOUD SPEND</span></footer>
         </div>
       </main>
