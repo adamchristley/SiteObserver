@@ -1,0 +1,10 @@
+# Opt-in CPU local vision. No Azure, credit card, or paid service needed.
+# Usage: docker compose -f compose.yaml -f compose.vision.yaml up --build
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.vision
+    environment:
+      SITEOBSERVER_YOLO_MODEL: yolo11n.pt
+      SITEOBSERVER_DEVICE: cpu
