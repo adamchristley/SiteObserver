@@ -1,0 +1,11 @@
+.venv
+__pycache__
+.pytest_cache
+*.pyc
+*.mp4
+*.avi
+*.onnx
+*.pt
+*.pth
+data
+tests

@@ -12,7 +12,9 @@
 - Incident history recorded on new hazards and severity transitions, with a bounded in-memory event log.
 - Live metrics, risk trend, pause/resume dashboard polling, service status, and accessible incident table.
 - A typed REST API with automatic OpenAPI documentation.
-- Optional recorded-video analysis using YOLO11n object detection + ByteTrack object IDs.\n- Annotated frame review, confidence scores, detections, and optional calibrated ground-plane projections.\n- Automated Python tests, frontend type checking, Docker Compose, and GitHub Actions CI.
+- Optional recorded-video analysis using YOLO11n object detection + ByteTrack object IDs.
+- Annotated frame review, confidence scores, detections, and optional calibrated ground-plane projections.
+- Automated Python tests, frontend type checking, Docker Compose, and GitHub Actions CI.
 
 ### System architecture
 
@@ -158,6 +160,10 @@ CI runs both on GitHub for pushes and pull requests.
 | `GET /health` | API status and operating mode |
 | `GET /api/site` | One timestamped site snapshot with positions, risk events and telemetry |
 | `GET /api/incidents?limit=30` | Most recent incident transitions, up to 250 |
+| `GET /api/vision/status` | Whether optional vision dependencies are available |
+| `POST /api/vision/jobs` | Upload video as multipart `file`, optional JSON `calibration` field |
+| `GET /api/vision/jobs/{id}` | Poll progress, annotated-frame metadata, and summary |
+| `GET /api/vision/jobs/{id}/frames/{index}` | Retrieve the sampled annotated JPEG for frame index |
 
 The server advances simulation time on snapshot requests. Incident history is per server process and resets when the API restarts. Data is **not persisted** in v0.1.
 
@@ -170,7 +176,7 @@ SiteObserver/
 │   │   ├── main.py         # FastAPI routes
 │   │   ├── models.py       # Pydantic contracts
 │   │   ├── risk.py         # Hazard rules and closest approach
-│   │   ├── simulator.py    # Trajectories and incident transitions\n│   │   ├── vision_api.py   # Bounded upload job/preview API\n│   │   ├── vision_worker.py# YOLO + ByteTrack optional processing\n│   │   └── vision_geometry.py # Calibration and image-only cues
+│   │   ├── simulator.py    # Trajectories and incident transitions\n│   │   ├── vision_api.py   # Bounded upload job/preview API\n│   │   ├── vision_worker.py # YOLO + ByteTrack optional processing\n│   │   └── vision_geometry.py # Calibration and image-only cues
 │   ├── tests/              # Risk and REST contract tests
 │   └── Dockerfile
 ├── compose.vision.yaml     # Opt-in local CPU inference\n├── frontend/
@@ -191,8 +197,10 @@ SiteObserver/
 - [x] Geometric risk engine with unit tests
 - [x] Interactive operational dashboard
 - [ ] Persist incident history in a local database
-- [x] Local recorded-video object detection and ByteTrack review (general COCO classes)\n- [ ] Fine-tune on public construction datasets for PPE and equipment classes
-- [x] Optional four-point homography input to approximate world positions\n- [ ] Evaluate and validate calibration on measured footage
+- [x] Local recorded-video object detection and ByteTrack review (general COCO classes)
+- [ ] Fine-tune on public construction datasets for PPE and equipment classes
+- [x] Optional four-point homography input to approximate world positions
+- [ ] Evaluate and validate calibration on measured footage
 - [ ] Benchmark alerts using held-out annotated near-miss scenarios
 - [ ] Compare temporal prediction models against the geometric baseline
 - [ ] Optional Azure Static Web Apps deployment and carefully controlled serverless services
@@ -208,4 +216,4 @@ SiteObserver is an engineering and research demonstration. Synthetic risk events
 
 ## License
 
-No license has been granted yet. Repository contents remain under the default copyright terms until the owner chooses a license.
+This repository does not yet declare its own software license. Ultralytics YOLO is AGPL-3.0 licensed. Before publishing a complete derivative application for use or distribution, select a compatible project license and follow the upstream model/code license requirements. If proprietary licensing is a future goal, investigate non-AGPL alternatives or an appropriate commercial license.
