@@ -73,3 +73,19 @@ export function submitVideo(file: File, calibration: string): Promise<VisionJob>
   if (calibration.trim()) body.append('calibration', calibration)
   return request<VisionJob>('/api/vision/jobs', { method: 'POST', body })
 }
+
+export type CameraSample = {
+  image_base64: string
+  detections: Detection[]
+  cues: { category: string; severity: string; description: string }[]
+  calibrated: boolean
+  width: number
+  height: number
+}
+
+export function analyzeCameraFrame(frame: Blob, sessionId: string): Promise<CameraSample> {
+  const form = new FormData()
+  form.append('file', frame, 'camera.jpg')
+  form.append('session_id', sessionId)
+  return request<CameraSample>('/api/vision/camera/frame', { method: 'POST', body: form })
+}

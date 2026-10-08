@@ -12,7 +12,7 @@
 - Incident history recorded on new hazards and severity transitions, with a bounded in-memory event log.
 - Live metrics, risk trend, pause/resume dashboard polling, service status, and accessible incident table.
 - A typed REST API with automatic OpenAPI documentation.
-- Optional recorded-video analysis using YOLO11n object detection + ByteTrack object IDs.
+- Optional recorded-video analysis and experimental sampled local webcam detection using YOLO11n + ByteTrack object IDs.
 - Annotated frame review, confidence scores, detections, and optional calibrated ground-plane projections.
 - Automated Python tests, frontend type checking, Docker Compose, and GitHub Actions CI.
 
@@ -164,6 +164,7 @@ CI runs both on GitHub for pushes and pull requests.
 | `POST /api/vision/jobs` | Upload video as multipart `file`, optional JSON `calibration` field |
 | `GET /api/vision/jobs/{id}` | Poll progress, annotated-frame metadata, and summary |
 | `GET /api/vision/jobs/{id}/frames/{index}` | Retrieve the sampled annotated JPEG for frame index |
+| `POST /api/vision/camera/frame` | Infer on one local JPEG frame using a single shared tracker session |
 
 The server advances simulation time on snapshot requests. Incident history is per server process and resets when the API restarts. Data is **not persisted** in v0.1.
 

@@ -7,6 +7,7 @@ import {
 import { getFrameURL, getVisionJob, getVisionStatus, submitVideo } from './vision-api'
 import type { VisionJob, VisionStatus } from './vision-api'
 import './vision.css'
+import CameraLab from './CameraLab'
 
 const exampleCalibration = JSON.stringify({
   pixel_points: [[100, 100], [800, 100], [800, 500], [100, 500]],
@@ -198,6 +199,7 @@ export default function VideoReview() {
           </div>}
         </section>
       )}
+      <CameraLab enabled={Boolean(availability?.available)} />
       <div className="vision-caution"><Clock3 size={15}/> The bundled pretrained COCO detector recognizes people and common road vehicles. Excavators, forklifts, hardhats, and construction-specific classes require separate fine-tuning. Do not treat this research prototype as a live safety alarm.</div>
     </div>
   )
