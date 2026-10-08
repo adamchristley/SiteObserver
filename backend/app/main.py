@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .models import Incident, SiteSnapshot
 from .simulator import SiteSimulator
 from .vision_api import router as vision_router
+from .camera_api import router as camera_router
 
 app = FastAPI(title="SiteObserver API", version="0.2.0",
               description="Research-only simulated construction hazard monitoring.")
@@ -36,3 +37,4 @@ def incidents(limit: int = Query(default=30, ge=1, le=250)) -> list[Incident]:
     return simulator.incidents(limit=limit)
 
 app.include_router(vision_router)
+app.include_router(camera_router)
