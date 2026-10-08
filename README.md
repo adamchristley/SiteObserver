@@ -2,7 +2,7 @@
 
 **Construction-site safety intelligence research prototype** built with FastAPI, Python, React, TypeScript, and a local-first architecture designed for an eventual Azure deployment.
 
-> **Status: v0.1 foundation.** The system currently uses **synthetic trajectories** and an **explainable geometric risk engine**. No camera model has been trained or integrated, and no cloud resources have been deployed. **This is not a certified workplace safety system.**
+> **Status: v0.2, local video analysis.** The synthetic site simulator remains available. Optional YOLO11 + ByteTrack can now analyze recorded footage. The pretrained model is not construction-specific, and no cloud resources have been deployed. **This is not a certified workplace safety system.**
 
 ## Demo features
 
@@ -12,7 +12,7 @@
 - Incident history recorded on new hazards and severity transitions, with a bounded in-memory event log.
 - Live metrics, risk trend, pause/resume dashboard polling, service status, and accessible incident table.
 - A typed REST API with automatic OpenAPI documentation.
-- Automated Python tests, frontend type checking, Docker Compose, and GitHub Actions CI.
+- Optional recorded-video analysis using YOLO11n object detection + ByteTrack object IDs.\n- Annotated frame review, confidence scores, detections, and optional calibrated ground-plane projections.\n- Automated Python tests, frontend type checking, Docker Compose, and GitHub Actions CI.
 
 ### System architecture
 
@@ -49,6 +49,58 @@ Then open:
 - Health check: http://localhost:8000/health
 
 Docker Compose runs entirely on your own machine. **No Azure account, cloud subscription, or payment method is necessary.** Stop with `Ctrl+C`. Run `docker compose down` to remove the application containers.
+
+## Milestone 2: optional local video analysis
+
+Default `docker compose up --build` remains lightweight and starts the
+simulator/dashboard without ML packages. To enable video analysis:
+
+1. Stop the running stack with `Ctrl+C`.
+2. Run the **opt-in vision Docker configuration** from the repository root:
+
+```bash
+git pull
+docker compose -f compose.yaml -f compose.vision.yaml up --build
+```
+
+3. Open http://localhost:5173 and select **Video analysis** in the sidebar.
+4. Upload a video (MP4/H.264 recommended, maximum 80 MB). The first analysis
+   automatically downloads the free `yolo11n.pt` weights. No cloud account,
+   API key, credit card, or paid deployment is required.
+
+**Performance:** The optional image runs inference on your **CPU** by default.
+Its first Docker build installs PyTorch and other large dependencies, so allow
+disk space and download time. Each job processes at most **150 sampled frames**
+(every fourth source frame), approximately the first 20 seconds at 30 FPS.
+Frames are intentionally downsampled to limit local processing cost.
+
+**Privacy and persistence:** Uploaded video is processed on the local backend
+and the original is deleted when its analysis finishes. Up to five recent jobs
+and their preview JPEG frames are retained in a temporary server directory.
+They are not automatically deleted until older jobs are purged or the Docker
+container is removed. Never upload confidential or identifiable footage
+without authorization. This endpoint has no authentication and is intended
+for localhost, **not** a public deployment.
+
+**Important limitations:**
+- The bundled COCO YOLO11n model detects **person, car, bus, and truck**.
+  It does not recognize excavators, forklifts, PPE, or construction-specific
+  activity without additional training.
+- Without calibration, the dashboard reports **image-plane overlap cues**
+  only. It does **not** call them actual collision risk.
+- For an approximate metric screening experiment, expand the camera
+  calibration section and supply four correspondences of image pixels to
+  measured ground-plane meters (both ordered identically). The worker/vehicle
+  bottom-center is projected through a homography; this assumes a fixed
+  camera and an approximately flat ground plane. **Any** resulting proximity
+  warnings are unvalidated research estimates, not safety-critical alerts.
+- Videos are processed as bounded jobs with playback of sampled images.
+  Live webcam streaming and construction-specific fine-tuning are future work.
+
+**Licensing:** The optional Ultralytics package and associated YOLO models
+are AGPL-3.0 licensed. Review its requirements before redistributing or
+commercializing the complete project. Do not assume the open-source
+dependencies permit use in a closed-source product without a license.
 
 ## Run without Docker
 
@@ -118,10 +170,10 @@ SiteObserver/
 │   │   ├── main.py         # FastAPI routes
 │   │   ├── models.py       # Pydantic contracts
 │   │   ├── risk.py         # Hazard rules and closest approach
-│   │   └── simulator.py    # Trajectories and incident transitions
+│   │   ├── simulator.py    # Trajectories and incident transitions\n│   │   ├── vision_api.py   # Bounded upload job/preview API\n│   │   ├── vision_worker.py# YOLO + ByteTrack optional processing\n│   │   └── vision_geometry.py # Calibration and image-only cues
 │   ├── tests/              # Risk and REST contract tests
 │   └── Dockerfile
-├── frontend/
+├── compose.vision.yaml     # Opt-in local CPU inference\n├── frontend/
 │   ├── src/
 │   │   ├── App.tsx         # Dashboard and site map
 │   │   ├── api.ts          # Typed API client
@@ -139,8 +191,8 @@ SiteObserver/
 - [x] Geometric risk engine with unit tests
 - [x] Interactive operational dashboard
 - [ ] Persist incident history in a local database
-- [ ] Integrate public construction-site image datasets and an object-detection model
-- [ ] Add tracking and camera-to-site calibration
+- [x] Local recorded-video object detection and ByteTrack review (general COCO classes)\n- [ ] Fine-tune on public construction datasets for PPE and equipment classes
+- [x] Optional four-point homography input to approximate world positions\n- [ ] Evaluate and validate calibration on measured footage
 - [ ] Benchmark alerts using held-out annotated near-miss scenarios
 - [ ] Compare temporal prediction models against the geometric baseline
 - [ ] Optional Azure Static Web Apps deployment and carefully controlled serverless services

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Activity, AlertTriangle, ArrowUpRight, BellRing, CheckCircle2, ChevronDown,
+  ScanSearch, Activity, AlertTriangle, ArrowUpRight, BellRing, CheckCircle2, ChevronDown,
   CircleDot, Clock3, HardHat, LayoutDashboard, MapPinned, Pause, Play,
   Radio, RefreshCw, Shield, ShieldAlert, ShieldCheck, Truck, Users, Zap,
 } from 'lucide-react'
