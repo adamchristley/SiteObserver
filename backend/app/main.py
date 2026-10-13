@@ -1,6 +1,8 @@
 """FastAPI app. Runs offline with simulated data; no Azure credentials needed."""
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -36,5 +38,7 @@ def site() -> SiteSnapshot:
 def incidents(limit: int = Query(default=30, ge=1, le=250)) -> list[Incident]:
     return simulator.incidents(limit=limit)
 
-app.include_router(vision_router)
-app.include_router(camera_router)
+# Public Azure demos expose only the synthetic site endpoints.
+if os.getenv("SITEOBSERVER_SIMULATION_ONLY", "").strip().lower() not in {"1", "true", "yes"}:
+    app.include_router(vision_router)
+    app.include_router(camera_router)
