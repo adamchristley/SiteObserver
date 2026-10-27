@@ -1,0 +1,43 @@
+name: Publish construction education demo image
+on:
+  push:
+    branches: [main]
+    paths:
+      - "construction-edu-flask/**"
+      - "prompt-web/**"
+      - ".github/workflows/publish-construction-edu.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify Flask endpoints
+        run: |
+          python -m pip install Flask==3.1.1 pytest
+          python -m pytest -q construction-edu-flask/test_app.py
+      - uses: docker/setup-buildx-action@v3
+      - name: Sign in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish safe demo image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./construction-edu-flask/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/adamchristley/construction-edu-demo:latest
+            ghcr.io/adamchristley/construction-edu-demo:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Public-safe Flask construction education prompt demo, no AI credentials
