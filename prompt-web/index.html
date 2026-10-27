@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101924">
+  <meta name="description" content="SiteObserver research prompt interface hosted on Azure.">
+  <title>SiteObserver | Prompt Lab</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar"><a class="brand" href="/"><span class="brand-icon">S<span>✦</span></span><span><strong>siteobserver<span class="lime">.</span></strong><small>RESEARCH PLATFORM</small></span></a><div class="toplinks"><span class="eyebrow">● AZURE RESEARCH ENVIRONMENT</span><a href="https://github.com/adamchristley/SiteObserver" target="_blank" rel="noopener noreferrer">View source ↗</a></div></header>
+  <main>
+    <div class="eyebrow section-label"><i></i> SITEOBSERVER / EXPERIMENTAL TOOLS</div>
+    <div class="intro"><div><h1>Prompt <span>Lab.</span></h1><p>Send a prompt to an Azure-hosted API. Inspect the response and round-trip time in one place.</p></div><span class="mode">DEMO API · NO AI MODEL</span></div>
+    <div class="layout">
+      <section class="workspace" aria-label="Prompt console">
+        <div class="panel-heading"><div><span class="eyebrow">01 / INTERFACE</span><h2>Send a request</h2></div><code>POST /api/prompt</code></div>
+        <form id="prompt-form">
+          <label for="prompt">YOUR PROMPT</label>
+          <div class="input-box"><textarea id="prompt" maxlength="2000" placeholder="Enter a question or request to test the endpoint..." required></textarea><div class="input-meta"><span>No model connected yet. This tests real HTTP requests.</span><span id="counter">0 / 2000</span></div></div>
+          <p class="eyebrow example-label">TRY AN EXAMPLE</p>
+          <div class="samples"><button type="button" data-sample="Summarize potential risks at a construction site.">Construction safety ↗</button><button type="button" data-sample="Explain how an Azure-hosted API receives prompts.">API workflow ↗</button><button type="button" data-sample="What information belongs on a safety monitoring dashboard?">Dashboard data ↗</button></div>
+          <div class="actions"><span>No prompts are persisted by this demo.</span><button id="send" class="send" type="submit">Send to API ↗</button></div>
+        </form>
+        <div class="response">
+          <div class="panel-heading"><div><span class="eyebrow">02 / OUTPUT</span><h2>API response</h2></div><span id="result-status" class="result-status">WAITING FOR REQUEST</span></div>
+          <div id="result" class="result-body" aria-live="polite">Responses from the Azure Function will appear here.</div>
+          <div class="metrics"><span>MODE <b id="mode">DEMO</b></span><span>ROUND TRIP <b id="latency">--</b></span><span>REQUEST ID <b id="request-id">--</b></span></div>
+        </div>
+      </section>
+      <aside class="sidebar">
+        <section class="side-card"><div class="side-heading"><span class="eyebrow">SYSTEM STATUS</span><span class="status-dot">● LIVE CHECK</span></div><h3>Managed Azure API</h3><p id="health" role="status">Checking connectivity...</p><div class="endpoint"><code>/api/health</code> <span id="health-code">...</span></div><button id="retry" class="retry" type="button">Recheck connection ↗</button></section>
+        <section class="side-card flow"><span class="eyebrow">REQUEST PATH</span><h3>How it works</h3><div><b>01</b><span><strong>Browser</strong><small>Prompt entered on website</small></span></div><div><b>02</b><span><strong>Azure Static Web Apps</strong><small>Hosts the page over HTTPS</small></span></div><div><b>03</b><span><strong>Azure Functions</strong><small>Processes POST /api/prompt</small></span></div><div><b>04</b><span><strong>Response</strong><small>JSON returned to the page</small></span></div></section>
+        <section class="side-card note"><span class="eyebrow">CURRENT MILESTONE</span><h3>Prove the connection.</h3><p>This is a real API returning a fixed demo acknowledgment, not an AI-generated answer. We can add a chosen model later.</p><span class="lime">PHASE 01 · HOST &amp; CONNECT</span></section>
+      </aside>
+    </div>
+  </main>
+  <footer><span>© SITEOBSERVER RESEARCH</span><span>AZURE STATIC WEB APPS · NON-PRODUCTION DEMO</span></footer>
+</div>
+</body>
+</html>

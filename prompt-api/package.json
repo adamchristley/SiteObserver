@@ -1,0 +1,16 @@
+{
+  "name": "siteobserver-prompt-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Azure Static Web Apps managed Functions demo API",
+  "main": "src/functions/*.js",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.0.0"
+  }
+}
