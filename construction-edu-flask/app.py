@@ -10,6 +10,7 @@ import hmac
 import os
 
 from flask import Flask, jsonify, request, send_from_directory
+from crs.pipeline import create_from_text, revise_from_text
 from crs_engine import (CRSEngine, CRSInputError, CRSNotFound, CRSVersionConflict,
                         RULES)
 
@@ -124,6 +125,24 @@ def regulations(engine):
 def create_scenario(engine):
     payload = json_payload()
     return jsonify(engine.create(payload.get('conditions'))), 201
+
+
+@app.post('/api/crs/nl/scenarios')
+@crs_protected
+def create_nl_scenario(engine):
+    """Extract explicit facts from English and create a versioned scenario."""
+    payload = json_payload()
+    return jsonify(create_from_text(engine, payload.get('text'))), 201
+
+
+@app.post('/api/crs/nl/scenarios/<sid>/messages')
+@crs_protected
+def revise_nl_scenario(engine, sid):
+    """Apply an English correction; optimistic version check prevents stale updates."""
+    payload = json_payload()
+    return jsonify(revise_from_text(engine, sid, payload.get('text'),
+                                    payload.get('expected_version'),
+                                    payload.get('branch', 'base')))
 
 
 @app.get('/api/crs/scenarios/<sid>')
