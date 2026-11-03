@@ -43,7 +43,7 @@ jobs:
       - name: Verify SQLite, Flask and PostgreSQL CRS-RAG endpoints
         run: |
           python -m pip install Flask==3.1.1 pytest 'psycopg[binary]>=3.2,<4'
-          python -m pytest -q construction-edu-flask/test_app.py construction-edu-flask/test_crs.py construction-edu-flask/test_postgres.py construction-edu-flask/test_nl_pipeline.py
+          python -m pytest -q construction-edu-flask/test_app.py construction-edu-flask/test_crs.py construction-edu-flask/test_postgres.py construction-edu-flask/test_nl_pipeline.py construction-edu-flask/test_osha_retrieval.py
   publish:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

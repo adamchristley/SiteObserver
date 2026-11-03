@@ -224,6 +224,15 @@ CREATE TABLE IF NOT EXISTS decision_events (
     decision_id TEXT NOT NULL, evaluated_version INTEGER NOT NULL,
     old_status TEXT, new_status TEXT NOT NULL, timestamp TEXT NOT NULL
 );
+-- Preserve the research catalog version actually consulted for each evaluated
+-- decision; this remains distinct from the regulatory source's own revision.
+CREATE TABLE IF NOT EXISTS decision_regulation_evidence (
+    scenario_id TEXT NOT NULL, branch TEXT NOT NULL, decision_id TEXT NOT NULL,
+    regulation_id TEXT NOT NULL, catalog_version TEXT NOT NULL,
+    catalog_content_sha256 TEXT NOT NULL, catalog_checked_on TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    PRIMARY KEY (scenario_id, branch, decision_id, regulation_id)
+);
 '''
 
 
@@ -347,6 +356,20 @@ class CRSEngine:
             if rule['regulation']:
                 db.execute('INSERT OR IGNORE INTO decision_dependencies VALUES (?,?,?,?,?)',
                            (sid, branch, decision_id, 'regulation', rule['regulation']))
+                # Snapshot the catalog evidence used at assessment time.
+                from crs.osha_retriever import get_regulation
+                source = get_regulation(rule['regulation'])
+                if source:
+                    db.execute(
+                        'INSERT INTO decision_regulation_evidence VALUES (?,?,?,?,?,?,?,?) '
+                        'ON CONFLICT(scenario_id,branch,decision_id,regulation_id) DO UPDATE SET '
+                        'catalog_version=excluded.catalog_version, '
+                        'catalog_content_sha256=excluded.catalog_content_sha256, '
+                        'catalog_checked_on=excluded.catalog_checked_on, '
+                        'source_url=excluded.source_url',
+                        (sid, branch, decision_id, source['id'], source['catalog_version'],
+                         source['catalog_content_sha256'], source['catalog_checked_on'],
+                         source['source_url']))
             for prior_id in rule.get('depends_on_decisions', []):
                 db.execute('INSERT OR IGNORE INTO decision_dependencies VALUES (?,?,?,?,?)',
                            (sid, branch, decision_id, 'decision', prior_id))
@@ -363,14 +386,32 @@ class CRSEngine:
         for d in db.execute('SELECT * FROM decisions WHERE scenario_id=? AND branch=? ORDER BY decision_id',
                             (sid, branch)):
             rule = RULES[d['decision_id']]
+            regulatory_evidence = []
+            if rule['regulation']:
+                saved_source = db.execute(
+                    'SELECT * FROM decision_regulation_evidence WHERE '
+                    'scenario_id=? AND branch=? AND decision_id=? AND regulation_id=?',
+                    (sid, branch, d['decision_id'], rule['regulation'])).fetchone()
+                entry = {'id': rule['regulation'], 'source_url': rule['url']}
+                if saved_source:
+                    from crs.osha_retriever import get_regulation
+                    current = get_regulation(rule['regulation'])
+                    entry.update({
+                        'catalog_version_at_evaluation': saved_source['catalog_version'],
+                        'catalog_content_sha256_at_evaluation': saved_source['catalog_content_sha256'],
+                        'catalog_checked_on_at_evaluation': saved_source['catalog_checked_on'],
+                        'catalog_changed_since_evaluation': (
+                            current is None or
+                            current['catalog_content_sha256'] != saved_source['catalog_content_sha256']),
+                    })
+                regulatory_evidence.append(entry)
             decisions.append({
                 'decision_id': d['decision_id'], 'title': rule['title'],
                 'status': d['status'], 'rationale': d['rationale'],
                 'depends_on': rule['dependencies'],
                 'depends_on_decisions': rule.get('depends_on_decisions', []),
                 'evidence_states': json.loads(d['evidence_json']),
-                'regulations': ([{'id': rule['regulation'], 'source_url': rule['url']}]
-                                if rule['regulation'] else []),
+                'regulations': regulatory_evidence,
                 'evaluated_version': d['evaluated_version'], 'evaluation_count': d['evaluation_count'],
             })
         return {

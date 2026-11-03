@@ -1,0 +1,241 @@
+{
+  "catalog_id": "osha-subpart-p-excavation-v1",
+  "reviewed_on": "2026-11-03",
+  "source_authority": "OSHA 29 CFR 1926 Subpart P",
+  "description": "Research retrieval catalog of selected OSHA excavation provisions. Each summary is an authored paraphrase, not the full legal text. Version is for this catalog, not an official OSHA regulatory revision.",
+  "regulations": [
+    {
+      "id": "29 CFR 1926.650(a)",
+      "title": "Excavation scope",
+      "summary": "OSHA Subpart P applies to open earth excavations, including trenches.",
+      "keywords": [
+        "excavation",
+        "excavations",
+        "trench",
+        "trenching",
+        "scope"
+      ],
+      "condition_keys": [
+        "is_trench"
+      ],
+      "decision_id": null,
+      "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.650"
+    },
+    {
+      "id": "29 CFR 1926.652(a)(1)",
+      "title": "Protection from cave-ins",
+      "summary": "Employees in excavations generally need an adequate cave-in protective system, with exceptions for excavations entirely in stable rock and for excavations under five feet where a competent-person examination finds no cave-in indication.",
+      "keywords": [
+        "protective",
+        "protection",
+        "cave-in",
+        "shoring",
+        "trench box",
+        "shield",
+        "stable rock",
+        "excavation",
+        "trench"
+      ],
+      "condition_keys": [
+        "depth_ft",
+        "protective_system",
+        "stable_rock",
+        "competent_person_no_cave_in"
+      ],
+      "decision_id": "protective_system",
+      "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.652"
+    },
+    {
+      "id": "29 CFR 1926.651(c)(2)",
+      "title": "Safe trench egress",
+      "summary": "Trenches at least four feet deep require a safe way out, such as a ladder or ramp, positioned so employees travel no more than 25 feet laterally.",
+      "keywords": [
+        "ladder",
+        "egress",
+        "exit",
+        "access",
+        "ramp",
+        "stairway",
+        "trench",
+        "four feet"
+      ],
+      "condition_keys": [
+        "is_trench",
+        "depth_ft",
+        "safe_egress_within_25ft"
+      ],
+      "decision_id": "trench_egress",
+      "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651"
+    },
+    {
+      "id": "29 CFR 1926.651(j)(2)",
+      "title": "Falling or rolling excavated materials",
+      "summary": "Where excavated materials or equipment could fall or roll into an excavation, protect employees by keeping hazards at least two feet from the edge, using sufficient retaining devices, or combining measures as needed.",
+      "keywords": [
+        "spoil",
+        "spoils",
+        "soil",
+        "stockpile",
+        "material",
+        "edge",
+        "retaining",
+        "falling",
+        "rolling"
+      ],
+      "condition_keys": [
+        "spoil_hazard",
+        "spoil_distance_ft",
+        "spoil_retained"
+      ],
+      "decision_id": "spoils",
+      "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651"
+    },
+    {
+      "id": "29 CFR 1926.651(k)(1)",
+      "title": "Competent-person inspections",
+      "summary": "A competent person inspects excavations and protective systems before work, as needed during a shift, and after rainstorms or other hazard-increasing events when employee exposure can reasonably be anticipated.",
+      "keywords": [
+        "inspection",
+        "inspect",
+        "competent person",
+        "rain",
+        "rainstorm",
+        "shift",
+        "hazard"
+      ],
+      "condition_keys": [
+        "inspection_before_work",
+        "rain_event",
+        "inspection_after_rain"
+      ],
+      "decision_id": "inspection",
+      "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651"
+    },
+    {
+      "id": "29 CFR 1926.651(b)(1)",
+      "title": "Underground utility locations",
+      "summary": "Before opening an excavation, determine estimated locations of underground utility installations that may reasonably be encountered.",
+      "keywords": [
+        "utility",
+        "utilities",
+        "underground",
+        "gas line",
+        "water line",
+        "power line",
+        "electrical cable",
+        "sewer",
+        "pipeline",
+        "buried"
+      ],
+      "condition_keys": [],
+      "decision_id": null,
+      "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651"
+    },
+    {
+      "id": "29 CFR 1926.651(g)(1)(i)",
+      "title": "Testing potentially hazardous atmospheres",
+      "summary": "For excavations deeper than four feet where oxygen deficiency or another hazardous atmosphere exists or is reasonably expected, test the atmosphere before employees enter.",
+      "keywords": [
+        "gas",
+        "oxygen",
+        "atmosphere",
+        "hazardous atmosphere",
+        "landfill",
+        "toxic",
+        "vapors",
+        "fumes",
+        "air quality",
+        "confined"
+      ],
+      "condition_keys": [],
+      "decision_id": null,
+      "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651"
+    },
+    {
+      "id": "29 CFR 1926.651(h)(1)",
+      "title": "Hazards from accumulated water",
+      "summary": "Employees must not work in an excavation with accumulated or accumulating water unless adequate precautions protect them from the resulting hazards.",
+      "keywords": [
+        "water",
+        "flood",
+        "flooding",
+        "pumping",
+        "water accumulation",
+        "standing water",
+        "groundwater",
+        "seepage"
+      ],
+      "condition_keys": [],
+      "decision_id": null,
+      "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651"
+    },
+    {
+      "id": "29 CFR 1926.651(f)",
+      "title": "Mobile equipment near excavation edges",
+      "summary": "When mobile equipment works next to an excavation and its operator lacks a clear view of the edge, use a warning system such as barricades, stop logs, or signals.",
+      "keywords": [
+        "truck",
+        "excavator",
+        "equipment",
+        "machine",
+        "mobile equipment",
+        "edge",
+        "barricade",
+        "stop log",
+        "warning"
+      ],
+      "condition_keys": [],
+      "decision_id": null,
+      "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651"
+    },
+    {
+      "id": "29 CFR 1926.651(i)(1)",
+      "title": "Stability of adjacent structures",
+      "summary": "Provide support such as shoring, bracing, or underpinning when excavation activity endangers the stability of nearby buildings or other structures.",
+      "keywords": [
+        "foundation",
+        "building",
+        "wall",
+        "adjacent",
+        "structure",
+        "underpinning",
+        "stability"
+      ],
+      "condition_keys": [],
+      "decision_id": null,
+      "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651"
+    },
+    {
+      "id": "29 CFR 1926.651(l)",
+      "title": "Walkways and crossings",
+      "summary": "Provide walkways where employees or equipment cross excavations and appropriate guardrails when these crossings are at least six feet above lower levels.",
+      "keywords": [
+        "walkway",
+        "crossing",
+        "bridge",
+        "guardrail",
+        "cross over",
+        "pedestrian"
+      ],
+      "condition_keys": [],
+      "decision_id": null,
+      "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651"
+    },
+    {
+      "id": "29 CFR 1926.652(b)(1)(i)",
+      "title": "Baseline sloping design option",
+      "summary": "Under the default sloping option, excavation faces cannot be steeper than one and one-half horizontal to one vertical unless an alternative permitted design option is used.",
+      "keywords": [
+        "slope",
+        "sloping",
+        "bench",
+        "benching",
+        "angle",
+        "soil type"
+      ],
+      "condition_keys": [],
+      "decision_id": null,
+      "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.652"
+    }
+  ]
+}
