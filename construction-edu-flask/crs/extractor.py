@@ -119,9 +119,9 @@ def extract_conditions(text):
     elif _has(r'\b(?:standing\s+water|accumulated\s+water|accumulating\s+water|water\s+(?:is\s+|has\s+been\s+)?accumulating|flood(?:ed|ing)\s+(?:excavation|trench)|water\s+(?:in|inside)\s+(?:the\s+)?(?:trench|excavation))\b', text):
         add('water_accumulating', True, 'water accumulation reported')
 
-    if _has(r'\b(?:no|without|lacking)\s+(?:adequate\s+)?(?:water[- ]hazard\s+)?(?:protective\s+)?precautions\b|\b(?:adequate\s+)?water\s+precautions\s+(?:were\s+|are\s+)?not\s+(?:taken|in\s+place)\b', text):
+    if _has(r'\b(?:no|without|lacking)\s+(?:adequate\s+)?(?:(?:water(?:[- ]hazard)?)\s+)?(?:protective\s+)?precautions\b|\b(?:adequate\s+)?water\s+precautions\s+(?:were\s+|are\s+)?not\s+(?:taken|in\s+place)\b', text):
         add('water_precautions_adequate', False, 'adequate water precautions reported absent')
-    elif _has(r'\b(?:adequate\s+(?:water[- ]hazard\s+)?(?:protective\s+)?precautions\s+(?:are\s+|were\s+|have\s+been\s+)?(?:in\s+place|taken|implemented|verified)|water\s+precautions\s+(?:are\s+|were\s+)?adequate)\b', text):
+    elif _has(r'\b(?:adequate\s+(?:(?:water(?:[- ]hazard)?)\s+)?(?:protective\s+)?precautions\s+(?:are\s+|were\s+|have\s+been\s+)?(?:in\s+place|taken|implemented|verified)|water\s+precautions\s+(?:are\s+|were\s+)?adequate)\b', text):
         add('water_precautions_adequate', True, 'adequate water precautions claimed (not verified)')
 
     # Utility references convey potential applicability only. Contact and
