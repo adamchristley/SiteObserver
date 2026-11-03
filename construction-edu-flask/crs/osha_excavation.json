@@ -170,7 +170,6 @@
         "seepage"
       ],
       "condition_keys": [
-        "employees_exposed",
         "water_accumulating",
         "water_precautions_adequate"
       ],
