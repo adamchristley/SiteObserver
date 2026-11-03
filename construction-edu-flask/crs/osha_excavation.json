@@ -1,8 +1,8 @@
 {
-  "catalog_id": "osha-subpart-p-excavation-v1",
+  "catalog_id": "osha-subpart-p-excavation-v2",
   "reviewed_on": "2026-11-03",
   "source_authority": "OSHA 29 CFR 1926 Subpart P",
-  "description": "Research retrieval catalog of selected OSHA excavation provisions. Each summary is an authored paraphrase, not the full legal text. Version is for this catalog, not an official OSHA regulatory revision.",
+  "description": "Versioned research retrieval catalog of selected OSHA excavation provisions. Seven narrowly scoped rules are supported by deterministic assessments. Entries are authored paraphrases, not legal text. Catalog version does not indicate an official OSHA regulatory revision.",
   "regulations": [
     {
       "id": "29 CFR 1926.650(a)",
@@ -127,8 +127,12 @@
         "pipeline",
         "buried"
       ],
-      "condition_keys": [],
-      "decision_id": null,
+      "condition_keys": [
+        "utilities_expected",
+        "utility_locations_estimated",
+        "excavation_opened"
+      ],
+      "decision_id": "underground_utilities",
       "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651"
     },
     {
@@ -165,8 +169,12 @@
         "groundwater",
         "seepage"
       ],
-      "condition_keys": [],
-      "decision_id": null,
+      "condition_keys": [
+        "employees_exposed",
+        "water_accumulating",
+        "water_precautions_adequate"
+      ],
+      "decision_id": "water_accumulation",
       "source_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651"
     },
     {
