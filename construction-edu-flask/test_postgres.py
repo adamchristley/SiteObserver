@@ -20,14 +20,14 @@ def test_postgres_persistence_and_selective_reassessment(monkeypatch):
     changed = CRSEngine().revise(sid, {'depth_ft': 4}, expected_version=1)
     assert changed['reassessed_decisions'] == [
         'assessed_rules_summary', 'protective_system', 'trench_egress']
-    assert set(changed['unchanged_decisions']) == {'inspection', 'spoils'}
+    assert set(changed['unchanged_decisions']) == {'inspection', 'spoils', 'water_accumulation', 'underground_utilities'}
     ds = {d['decision_id']: d for d in changed['decisions']}
     assert ds['inspection']['evaluation_count'] == 1
     assert ds['trench_egress']['evaluation_count'] == 2
     reloaded = CRSEngine().get(sid)
     assert reloaded['version'] == 2
     assert reloaded['conditions']['depth_ft'] == 4
-    assert len(CRSEngine().history(sid)['decision_events']) == 8
+    assert len(CRSEngine().history(sid)['decision_events']) == 10
     alternative = CRSEngine().branch(sid, 'what_if')
     assert alternative['parent_branch'] == 'base'
     assert CRSEngine().get(sid)['conditions']['depth_ft'] == 4
