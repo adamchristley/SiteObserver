@@ -227,25 +227,62 @@ CREATE TABLE IF NOT EXISTS decision_events (
 '''
 
 
+class _PostgresConnection:
+    """Adapter for the deterministic core's small, fixed set of SQL operations.
+
+    All queries are static trusted statements owned by this module.
+    """
+    def __init__(self, conn):
+        self.conn = conn
+
+    def executescript(self, schema):
+        # Psycopg 3 accepts multiple SQL statements without query parameters.
+        self.conn.execute(schema)
+
+    def execute(self, sql, params=()):
+        if sql.strip() == 'BEGIN IMMEDIATE':
+            # Transaction-scoped advisory lock serializes revisions across replicas.
+            return self.conn.execute('SELECT pg_advisory_xact_lock(1926652)')
+        if sql.startswith('INSERT OR IGNORE INTO '):
+            sql = sql.replace('INSERT OR IGNORE INTO ', 'INSERT INTO ', 1)
+            sql += ' ON CONFLICT DO NOTHING'
+        return self.conn.execute(sql.replace('?', '%s'), params)
+
+
 class CRSEngine:
     def __init__(self, db_path=None):
-        self.db_path = str(db_path or os.environ.get('CRS_DB_PATH', '/tmp/crs_rag_research.sqlite3'))
+        # Explicit db_path selects SQLite for tests and offline demonstrations.
+        self.postgres_url = os.environ.get('CRS_DATABASE_URL') if db_path is None else None
+        self.db_path = None if self.postgres_url else str(
+            db_path or os.environ.get('CRS_DB_PATH', '/tmp/crs_rag_research.sqlite3'))
         if self.db_path == ':memory:':
             raise CRSInputError('Use a file-backed SQLite database for multi-request persistence')
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        if self.db_path:
+            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._db() as db:
             db.executescript(SCHEMA)
 
     @contextmanager
     def _db(self):
-        db = sqlite3.connect(self.db_path, timeout=20)
-        db.row_factory = sqlite3.Row
-        db.execute('PRAGMA busy_timeout=20000')
-        try:
-            with db:
-                yield db
-        finally:
-            db.close()
+        if self.postgres_url:
+            try:
+                import psycopg
+                from psycopg.rows import dict_row
+            except ImportError as exc:
+                raise RuntimeError('PostgreSQL backend requires psycopg[binary]') from exc
+            # Never fall back to ephemeral SQLite if PostgreSQL is unreachable.
+            with psycopg.connect(self.postgres_url, row_factory=dict_row,
+                                 connect_timeout=10) as conn:
+                yield _PostgresConnection(conn)
+        else:
+            db = sqlite3.connect(self.db_path, timeout=20)
+            db.row_factory = sqlite3.Row
+            db.execute('PRAGMA busy_timeout=20000')
+            try:
+                with db:
+                    yield db
+            finally:
+                db.close()
 
     def _branch(self, db, scenario_id, branch):
         b = db.execute('SELECT * FROM branches WHERE scenario_id=? AND branch=?',
