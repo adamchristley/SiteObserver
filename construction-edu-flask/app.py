@@ -93,6 +93,8 @@ def crs_protected(route):
         # Feature disabled unless explicitly configured. Do not expose user scenario data unauthenticated.
         if not secret or not hmac.compare_digest(token, 'Bearer ' + secret):
             return jsonify({'error': 'CRS research endpoint is disabled or unauthorized'}), 403
+        if os.environ.get('CRS_REQUIRE_DURABLE_DB') == '1' and not os.environ.get('CRS_DATABASE_URL'):
+            return jsonify({'error': 'Durable CRS database must be configured'}), 503
         try:
             return route(CRSEngine(), *args, **kwargs)
         except CRSInputError as exc:
