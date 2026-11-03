@@ -3,7 +3,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN pip install --no-cache-dir Flask==3.1.1 gunicorn==23.0.0 && \
     useradd --create-home --uid 10001 webuser
-COPY construction-edu-flask/app.py ./app.py
+COPY construction-edu-flask/app.py construction-edu-flask/crs_engine.py ./
 COPY prompt-web/index.html prompt-web/app.js prompt-web/styles.css ./prompt-web/
 USER webuser
 EXPOSE 8000
