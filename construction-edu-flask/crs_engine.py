@@ -47,10 +47,25 @@ RULES = {
         'dependencies': ['employees_exposed', 'inspection_before_work',
                          'rain_event', 'inspection_after_rain'],
     },
+    'water_accumulation': {
+        'title': 'Protection from accumulated or accumulating water',
+        'regulation': '29 CFR 1926.651(h)(1)',
+        'url': 'https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651',
+        'dependencies': ['employees_exposed', 'water_accumulating',
+                         'water_precautions_adequate'],
+    },
+    'underground_utilities': {
+        'title': 'Determine expected underground utility locations before opening',
+        'regulation': '29 CFR 1926.651(b)(1)',
+        'url': 'https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651',
+        'dependencies': ['utilities_expected', 'utility_locations_estimated',
+                         'excavation_opened'],
+    },
     'assessed_rules_summary': {
         'title': 'Summary of assessed OSHA rules (not a safety certification)',
         'regulation': None, 'url': None, 'dependencies': [],
-        'depends_on_decisions': ['protective_system', 'trench_egress', 'spoils', 'inspection'],
+        'depends_on_decisions': ['protective_system', 'trench_egress', 'spoils', 'inspection',
+                                 'water_accumulation', 'underground_utilities'],
     },
 }
 
@@ -58,6 +73,8 @@ BOOL_FIELDS = {
     'employees_exposed', 'stable_rock', 'competent_person_no_cave_in',
     'is_trench', 'safe_egress_within_25ft', 'spoil_hazard', 'spoil_retained',
     'inspection_before_work', 'rain_event', 'inspection_after_rain',
+    'water_accumulating', 'water_precautions_adequate',
+    'utilities_expected', 'utility_locations_estimated', 'excavation_opened',
 }
 NUMBER_FIELDS = {'depth_ft', 'spoil_distance_ft'}
 ENUM_FIELDS = {'protective_system': {'none', 'present_unverified', 'verified'}}
@@ -107,10 +124,57 @@ def assess(decision_id, state):
     if decision_id == 'assessed_rules_summary':
         raise CRSInputError('Aggregate decision must be evaluated after its upstream decisions')
     get = state.get
+
+    # 1926.651(b)(1) is a pre-excavation obligation, even when nobody is
+    # currently working inside the excavation. Do not apply the exposure
+    # gate used by the remaining worker-protection rules.
+    if decision_id == 'underground_utilities':
+        expected = get('utilities_expected')
+        located = get('utility_locations_estimated')
+        opened = get('excavation_opened')
+        if expected is False:
+            return 'not_applicable', (
+                'Scenario reports no underground utility installations reasonably expected; '
+                'this has not been independently confirmed.')
+        if expected is None:
+            return 'undetermined', (
+                'Whether underground utilities may reasonably be encountered is unknown.')
+        if located is True:
+            return 'compliant', (
+                'Scenario reports estimated utility locations determined for this '
+                'specific paragraph. Utility owner contact, exact locations and '
+                'protection duties are separate requirements, not assessed here.')
+        if located is False and opened is True:
+            return 'noncompliant', (
+                'Excavation was opened without determining the estimated locations '
+                'of expected underground installations.')
+        return 'undetermined', (
+            'Confirm estimated utility locations before opening excavation. '
+            'Whether work already began or locations were determined is unresolved.')
+
     if get('employees_exposed') is None:
         return 'undetermined', 'Employee exposure is unknown; applicability requires clarification.'
     if not get('employees_exposed'):
         return 'not_applicable', 'No employee exposure is represented in the current scenario.'
+
+    if decision_id == 'water_accumulation':
+        water = get('water_accumulating')
+        adequate = get('water_precautions_adequate')
+        if water is False:
+            return 'not_applicable', 'Scenario states no accumulated or accumulating water.'
+        if water is None:
+            return 'undetermined', 'Whether water has accumulated or is accumulating is unknown.'
+        if adequate is False:
+            return 'noncompliant', (
+                'Employees are in an excavation with accumulating water and '
+                'adequate precautions are reported absent.')
+        if adequate is True:
+            return 'compliant', (
+                'Scenario explicitly reports adequate water-hazard precautions. '
+                'This claim has not been independently verified.')
+        return 'undetermined', (
+            'Water accumulation is reported but whether adequate protective '
+            'precautions exist has not been established.')
 
     if decision_id == 'protective_system':
         depth = get('depth_ft')
