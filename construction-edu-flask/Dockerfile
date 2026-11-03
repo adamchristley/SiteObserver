@@ -4,6 +4,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir Flask==3.1.1 gunicorn==23.0.0 'psycopg[binary]>=3.2,<4' && \
     useradd --create-home --uid 10001 webuser
 COPY construction-edu-flask/app.py construction-edu-flask/crs_engine.py ./
+COPY construction-edu-flask/crs/ ./crs/
 COPY prompt-web/index.html prompt-web/app.js prompt-web/styles.css ./prompt-web/
 USER webuser
 EXPOSE 8000
