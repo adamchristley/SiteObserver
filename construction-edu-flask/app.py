@@ -11,8 +11,9 @@ import os
 
 from flask import Flask, jsonify, request, send_from_directory
 from crs.pipeline import create_from_text, revise_from_text
+from crs.osha_retriever import retrieve_osha, catalogue_versions
 from crs_engine import (CRSEngine, CRSInputError, CRSNotFound, CRSVersionConflict,
-                        RULES)
+                        RULES, validate_changes)
 
 WEB = Path(__file__).resolve().parent / 'prompt-web'
 if not WEB.is_dir():
@@ -118,6 +119,55 @@ def json_payload():
 def regulations(engine):
     del engine
     return jsonify(RULES)
+
+
+@app.get('/api/crs/osha/catalog')
+@crs_protected
+def osha_catalog(engine):
+    del engine
+    return jsonify(catalogue_versions())
+
+
+@app.post('/api/crs/osha/search')
+@crs_protected
+def osha_search(engine):
+    del engine
+    payload = json_payload()
+    query = payload.get('query', '')
+    conditions = payload.get('conditions') or {}
+    if conditions:
+        conditions = validate_changes(conditions)
+    try:
+        result = retrieve_osha(query=query, conditions=conditions, limit=payload.get('limit', 12))
+    except ValueError as exc:
+        raise CRSInputError(str(exc)) from exc
+    return jsonify(result)
+
+
+@app.get('/api/crs/scenarios/<sid>/osha')
+@crs_protected
+def osha_for_scenario(engine, sid):
+    branch = request.args.get('branch', 'base')
+    scenario = engine.get(sid, branch)
+    try:
+        matching = retrieve_osha(
+            query=request.args.get('q', ''),
+            conditions=scenario['conditions'],
+            limit=12)
+    except ValueError as exc:
+        raise CRSInputError(str(exc)) from exc
+    return jsonify({
+        'scenario_id': sid,
+        'branch': branch,
+        'scenario_version': scenario['version'],
+        'retrieval': matching,
+        'assessed_regulations': [
+            {'decision_id': d['decision_id'], 'status': d['status'],
+             'regulations': d['regulations']} for d in scenario['decisions']
+            if d['regulations']
+        ],
+        'warning': 'Other retrieved entries are not yet evaluated by the rule engine.',
+    })
 
 
 @app.post('/api/crs/scenarios')
