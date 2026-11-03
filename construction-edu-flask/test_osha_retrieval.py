@@ -11,7 +11,7 @@ from crs.state_resolver import create_from_text, revise_from_text
 
 def test_catalog_contains_official_citations_and_catalog_versions():
     meta = catalogue_versions()
-    assert meta['catalog_version'] == 'osha-subpart-p-excavation-v1'
+    assert meta['catalog_version'] == 'osha-subpart-p-excavation-v2'
     assert meta['source_is_live'] is False
     assert meta['total_catalog_entries'] >= 10
     by_id = {x['id']: x for x in meta['citations']}
@@ -91,7 +91,7 @@ def test_assessments_record_catalog_version_at_evaluation(tmp_path):
     protective = next(x for x in scenario['decisions'] if x['decision_id'] == 'protective_system')
     cite = protective['regulations'][0]
     assert cite['id'] == '29 CFR 1926.652(a)(1)'
-    assert cite['catalog_version_at_evaluation'] == 'osha-subpart-p-excavation-v1'
+    assert cite['catalog_version_at_evaluation'] == 'osha-subpart-p-excavation-v2'
     assert len(cite['catalog_content_sha256_at_evaluation']) == 64
     assert cite['catalog_changed_since_evaluation'] is False
     assert CRSEngine(tmp_path / 'source_evidence.sqlite3').get(sid)['decisions'][0]['decision_id']
@@ -136,7 +136,7 @@ def test_nl_response_has_retrieved_sources(tmp_path):
     b = revise_from_text(engine, sid, 'Actually, the trench is only 4 feet deep.', 1)
     assert b['scenario']['version'] == 2
     assert '29 CFR 1926.651(c)(2)' in {x['id'] for x in b['osha_retrieval']['results']}
-    assert set(b['scenario']['unchanged_decisions']) == {'inspection', 'spoils'}
+    assert set(b['scenario']['unchanged_decisions']) == {'inspection', 'spoils', 'water_accumulation', 'underground_utilities'}
 
 
 def test_flask_osha_endpoints_authorized_and_integrated(tmp_path, monkeypatch):

@@ -112,6 +112,35 @@ def extract_conditions(text):
     if _has(r'\b(?:competent[- ]person|inspector)\s+(?:has\s+)?(?:examined|inspected)\b.{0,75}\b(?:no\s+(?:indication|risk|sign)\s+of\s+(?:potential\s+)?cave[- ]in|no\s+cave[- ]in\s+(?:hazard|potential))\b', text):
         add('competent_person_no_cave_in', True, 'competent-person examination (user claim)')
 
+    # Layer 5 expansion: never infer the *adequacy* of water precautions from
+    # the mere mention of pumping, shields, or water removal equipment.
+    if _has(r'\b(?:no\s+(?:standing|accumulated|accumulating)\s+water|water\s+(?:is\s+)?not\s+accumulating|excavation\s+(?:is\s+)?dry)\b', text):
+        add('water_accumulating', False, 'no accumulated or accumulating water')
+    elif _has(r'\b(?:standing\s+water|accumulated\s+water|accumulating\s+water|water\s+(?:is\s+|has\s+been\s+)?accumulating|flood(?:ed|ing)\s+(?:excavation|trench)|water\s+(?:in|inside)\s+(?:the\s+)?(?:trench|excavation))\b', text):
+        add('water_accumulating', True, 'water accumulation reported')
+
+    if _has(r'\b(?:no|without|lacking)\s+(?:adequate\s+)?(?:(?:water(?:[- ]hazard)?)\s+)?(?:protective\s+)?precautions\b|\b(?:adequate\s+)?water\s+precautions\s+(?:were\s+|are\s+)?not\s+(?:taken|in\s+place)\b', text):
+        add('water_precautions_adequate', False, 'adequate water precautions reported absent')
+    elif _has(r'\b(?:adequate\s+(?:(?:water(?:[- ]hazard)?)\s+)?(?:protective\s+)?precautions\s+(?:are\s+|were\s+|have\s+been\s+)?(?:in\s+place|taken|implemented|verified)|water\s+precautions\s+(?:are\s+|were\s+)?adequate)\b', text):
+        add('water_precautions_adequate', True, 'adequate water precautions claimed (not verified)')
+
+    # Utility references convey potential applicability only. Contact and
+    # exact-location obligations under 1926.651(b)(2)-(4) are not evaluated.
+    if _has(r'\b(?:no|without)\s+(?:underground\s+|buried\s+)?(?:utility\s+installations|utilities|utility\s+lines)\s+(?:are\s+)?(?:expected|anticipated|nearby|present)\b|\bno\s+underground\s+utilities\b', text):
+        add('utilities_expected', False, 'no underground utilities expected (user claim)')
+    elif _has(r'\b(?:underground\s+utilities|underground\s+utility\s+installations|buried\s+(?:utilities|utility\s+lines)|utility\s+lines)\s+(?:are\s+|were\s+)?(?:nearby|expected|anticipated|present|in\s+(?:the\s+)?area)\b', text):
+        add('utilities_expected', True, 'underground utilities expected')
+
+    if _has(r'\b(?:utility\s+(?:locations|installations)|locations\s+of\s+(?:the\s+)?(?:underground\s+)?utilities)\s+(?:have\s+|were\s+|are\s+)?not\s+(?:been\s+)?(?:estimated|determined|identified|located)\b|\b(?:no|without)\s+(?:utility\s+)?location\s+survey\b', text):
+        add('utility_locations_estimated', False, 'estimated utility locations not determined')
+    elif _has(r'\b(?:utility\s+locations|estimated\s+locations\s+of\s+(?:underground\s+)?utilities|locations\s+of\s+(?:the\s+)?underground\s+utilities)\s+(?:have\s+been\s+|were\s+|are\s+)?(?:estimated|determined|identified)\b', text):
+        add('utility_locations_estimated', True, 'estimated utility locations determined (user claim)')
+
+    if _has(r'\b(?:excavation|trench)\s+(?:has\s+)?not\s+(?:been\s+)?opened\b|\b(?:before\s+opening|not\s+yet\s+opened)\s+(?:the\s+)?(?:excavation|trench)\b', text):
+        add('excavation_opened', False, 'excavation not yet opened')
+    elif _has(r'\b(?:excavation|trench)\s+(?:has\s+been\s+|is\s+|was\s+)?(?:already\s+)?open(?:ed)?\b|\b(?:excavation|trench)\s+(?:has\s+)?(?:already\s+)?begun\b', text):
+        add('excavation_opened', True, 'excavation already opened')
+
     # The underlying CRS engine performs range/type checks.
     if conditions:
         validate_changes(conditions)

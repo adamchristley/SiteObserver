@@ -78,7 +78,7 @@ def test_create_and_correct_selectively(engine):
     assert set(state['reassessed_decisions']) == {
         'protective_system', 'trench_egress', 'assessed_rules_summary'
     }
-    assert set(state['unchanged_decisions']) == {'inspection', 'spoils'}
+    assert set(state['unchanged_decisions']) == {'inspection', 'spoils', 'water_accumulation', 'underground_utilities'}
     assert engine.get(sid)['conditions']['depth_ft'] == 4
     assert engine.get(sid)['conditions']['protective_system'] == 'none'
     assert [e['version'] for e in engine.history(sid)['state_events']] == [1, 2]
