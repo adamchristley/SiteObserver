@@ -466,7 +466,8 @@ class CRSEngine:
                         'catalog_checked_on_at_evaluation': saved_source['catalog_checked_on'],
                         'catalog_changed_since_evaluation': (
                             current is None or
-                            current['catalog_content_sha256'] != saved_source['catalog_content_sha256']),
+                            current['catalog_content_sha256'] != saved_source['catalog_content_sha256'] or
+                            current['catalog_version'] != saved_source['catalog_version']),
                     })
                 regulatory_evidence.append(entry)
             decisions.append({
