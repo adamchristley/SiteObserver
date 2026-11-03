@@ -42,7 +42,7 @@ def test_selective_reassessment_and_reverse_dependency(engine):
     sid = first['scenario_id']
     changed = engine.revise(sid, {'depth_ft': 4}, expected_version=1)
     assert changed['reassessed_decisions'] == ['assessed_rules_summary', 'protective_system', 'trench_egress']
-    assert set(changed['unchanged_decisions']) == {'inspection', 'spoils'}
+    assert set(changed['unchanged_decisions']) == {'inspection', 'spoils', 'water_accumulation', 'underground_utilities'}
     assert dmap(changed)['trench_egress']['evaluation_count'] == 2
     assert dmap(changed)['inspection']['evaluation_count'] == 1
     assert dmap(changed)['spoils']['evaluated_version'] == 1
@@ -53,7 +53,7 @@ def test_selective_reassessment_and_reverse_dependency(engine):
     assert dmap(fixed)['protective_system']['status'] == 'compliant'
     assert dmap(fixed)['trench_egress']['evaluation_count'] == 2
     assert dmap(fixed)['assessed_rules_summary']['evaluation_count'] == 3
-    assert len(engine.history(sid)['decision_events']) == 10  # 5 initial + 3 + 2
+    assert len(engine.history(sid)['decision_events']) == 12  # 7 initial + 3 + 2
 
 
 def test_noop_and_remove_facts(engine):
