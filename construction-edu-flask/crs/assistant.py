@@ -239,12 +239,12 @@ class CRSAssistant:
                     status = "Requires Expert Review"
                 model_mode = "azure_openai"
                 present = {**(previous["conditions"] if previous else {}), **conditions}
-                citations = list(dict.fromkeys(citations + [
+                allowed_citations = list(dict.fromkeys([
                     source.get("citation", source.get("id"))
                     for source in (retrieved.get("chunks", []) or retrieved.get("catalog_matches", []))
                     if source.get("citation", source.get("id"))]))
-                proposals = _grounded_edges(suggestion.get("dependencies"), present, citations)
-                candidates = _grounded_decisions(suggestion.get("decisions"), present, citations)
+                proposals = _grounded_edges(suggestion.get("dependencies"), present, allowed_citations)
+                candidates = _grounded_decisions(suggestion.get("decisions"), present, allowed_citations)
                 for candidate in candidates:
                     for key in candidate["condition_keys"]:
                         edge = {"decision_id": candidate["decision_id"], "condition_key": key,
@@ -379,19 +379,19 @@ class CRSAssistant:
                 "SELECT decision_id, condition_key, citation, source, review_status "
                 "FROM crs_dynamic_edges WHERE scenario_id=? AND branch=?",
                 (scenario_id, branch)).fetchall()
-        deterministic = [
-            {"decision_id": name, "condition_key": key, "source": "rule_based", "review_status": "defined"}
-            for name, rule in RULES.items() for key in rule["dependencies"]
-        ]
             candidates = db.execute(
                 "SELECT decision_id, status, rationale, citations_json, evaluated_version, "
                 "evaluation_count, review_status FROM crs_dynamic_decisions "
                 "WHERE scenario_id=? AND branch=?",
                 (scenario_id, branch)).fetchall()
+        deterministic = [
+            {"decision_id": name, "condition_key": key, "source": "rule_based", "review_status": "defined"}
+            for name, rule in RULES.items() for key in rule["dependencies"]
+        ]
         return {"scenario_id": scenario_id, "branch": branch, "version": scenario["version"],
                 "deterministic_edges": deterministic,
                 "proposed_edges": [dict(p) for p in proposals],
                 "candidate_decisions": [
                     {**dict(c), "citations": json.loads(c["citations_json"])}
                     for c in candidates],
-                "warning": "Model-proposed edges do not modify the certified deterministic rule definitions."}
+                "warning": "Model-proposed edges do not modify the predefined deterministic rule definitions."}
