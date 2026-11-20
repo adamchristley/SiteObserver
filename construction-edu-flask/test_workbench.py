@@ -107,6 +107,11 @@ def test_model_citations_and_dynamic_graph_are_validated(wb, monkeypatch):
     reviewed = wb.review(sid, "base", "shield_coverage", "accepted", "Dependencies inspected")
     assert reviewed["candidate_decisions"][0]["review_state"] == "accepted"
     assert reviewed["candidate_decisions"][0]["evidence_links"][0]["source_url"].startswith("https://www.osha.gov/")
+    ingest(wb.engine, ["1926.651"], lambda _: html_for("1926.651").replace("provide protections","provide adequate protections").encode())
+    outdated = wb.view(sid)["candidate_decisions"][0]
+    assert outdated["source_outdated"] and outdated["stale"]
+    with pytest.raises(CRSInputError, match="changed"):
+        wb.review(sid, "base", "shield_coverage", "accepted")
     with pytest.raises(CRSInputError):
         wb.review(sid, "base", "shield_coverage", "compliant")
     assert "shield_coverage" in [x["decision_id"] for x in wb.branch(sid,"alt")["candidate_decisions"]]
