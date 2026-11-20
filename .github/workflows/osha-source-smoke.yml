@@ -49,5 +49,5 @@ jobs:
           print("root",root.tag,"children",[(x.tag,x.attrib) for x in list(root)[:10]],flush=True)
           for x in root.iter():
               if x.tag in ("SECTION","APPENDIX","DIV8","DIV9"):
-                  print("element",x.tag,x.attrib,"head",("".join(x.itertext())[:140]),flush=True)
+                  print("element",x.tag,x.attrib,"sample",ET.tostring(x,encoding="unicode")[:850],flush=True)
           PY
