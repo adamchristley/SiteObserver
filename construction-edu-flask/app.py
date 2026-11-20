@@ -10,6 +10,7 @@ import hmac
 import os
 
 from flask import Flask, jsonify, request, send_from_directory
+from crs.web_api import register_web_api
 from crs.pipeline import create_from_text, revise_from_text
 from crs.osha_retriever import retrieve_osha, catalogue_versions
 from crs_engine import (CRSEngine, CRSInputError, CRSNotFound, CRSVersionConflict,
@@ -49,6 +50,21 @@ def js():
 @app.get('/styles.css')
 def css():
     return send_from_directory(WEB, 'styles.css')
+
+
+@app.get('/research')
+def research_page():
+    return send_from_directory(WEB, 'research.html')
+
+
+@app.get('/research.js')
+def research_script():
+    return send_from_directory(WEB, 'research.js')
+
+
+@app.get('/research.css')
+def research_style():
+    return send_from_directory(WEB, 'research.css')
 
 
 @app.get('/api/health')
@@ -228,3 +244,7 @@ def get_history(engine, sid):
 @app.errorhandler(413)
 def too_large(_):
     return jsonify({'error': 'Request body is too large'}), 413
+
+
+# Register protected web-workbench API without altering existing CRS endpoints.
+register_web_api(app)
