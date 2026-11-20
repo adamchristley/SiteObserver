@@ -79,6 +79,9 @@ def test_proposed_edges_are_persisted_and_flagged_on_revisions(tmp_path):
                 "status": "Pending Verification", "citations": ["1926.652(a)(1)"],
                 "dependencies": [{"decision_id": "shield_coverage", "condition_key": "depth_ft",
                                   "citation": "1926.652(a)(1)"}],
+                "decisions": [{"decision_id": "shield_coverage", "status": "requires_review",
+                              "rationale": "Unverified worker coverage", "citations": ["1926.652(a)(1)"],
+                              "condition_keys": ["depth_ft"]}],
             }
         return {
             "conditions": {"is_trench": True, "depth_ft": 6, "employees_exposed": True},
@@ -86,6 +89,9 @@ def test_proposed_edges_are_persisted_and_flagged_on_revisions(tmp_path):
             "status": "Insufficient Information", "citations": ["1926.652(a)(1)"],
             "dependencies": [{"decision_id": "shield_coverage", "condition_key": "depth_ft",
                               "citation": "1926.652(a)(1)"}],
+            "decisions": [{"decision_id": "shield_coverage", "status": "requires_review",
+                          "rationale": "Check shield coverage", "citations": ["1926.652(a)(1)"],
+                          "condition_keys": ["depth_ft"]}],
         }
 
     assistant = CRSAssistant(engine, index=index, infer=fake_llm)
@@ -94,9 +100,11 @@ def test_proposed_edges_are_persisted_and_flagged_on_revisions(tmp_path):
     assert first["dependency_proposals"][0]["decision_id"] == "shield_coverage"
     sid = first["scenario"]["scenario_id"]
     assert assistant.graph(sid)["proposed_edges"][0]["review_status"] == "proposed"
+    assert assistant.graph(sid)["candidate_decisions"][0]["evaluation_count"] == 1
     second = assistant.analyze("The trench is now 4 feet deep.", scenario_id=sid, expected_version=1)
     assert second["scenario"]["version"] == 2
     assert second["candidate_decisions_flagged"] == ["shield_coverage"]
+    assert assistant.graph(sid)["candidate_decisions"][0]["evaluation_count"] == 2
     assert len(assistant.history(sid)) == 2
     assert engine.get(sid)["conditions"]["depth_ft"] == 4
 
