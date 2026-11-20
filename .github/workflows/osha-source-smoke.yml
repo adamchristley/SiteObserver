@@ -40,4 +40,14 @@ jobs:
                       print(response.status, response.url, "bytes",len(data),"sample",repr(data[:100]),flush=True)
               except Exception as e:
                   print(type(e).__name__,str(e)[:160],url,flush=True)
+          from xml.etree import ElementTree as ET
+          url="https://www.govinfo.gov/content/pkg/CFR-2025-title29-vol8/xml/CFR-2025-title29-vol8-part1926-subpartP.xml"
+          with urlopen(Request(url,headers={"User-Agent":"Mozilla/5.0"}),timeout=15) as response:
+              body=response.read(2_000_000)
+          print("GOVINFO XML bytes",len(body),flush=True)
+          root=ET.fromstring(body)
+          print("root",root.tag,"children",[(x.tag,x.attrib) for x in list(root)[:10]],flush=True)
+          for x in root.iter():
+              if x.tag in ("SECTION","APPENDIX","DIV8","DIV9"):
+                  print("element",x.tag,x.attrib,"head",("".join(x.itertext())[:140]),flush=True)
           PY
