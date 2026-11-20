@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS osha_document_chunks (
  ingested_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_osha_source ON osha_document_chunks(source_url);
+CREATE TABLE IF NOT EXISTS osha_vectors (
+ chunk_id TEXT PRIMARY KEY, model TEXT NOT NULL, vector_json TEXT NOT NULL
+);
 """
 
 class _Text(HTMLParser):
@@ -149,6 +152,10 @@ def ingest(engine, sections=None, fetch=None):
         chunks = download_section(section, fetch)
         with engine._db() as db:
             _init(db)
+            old_chunks = db.execute("SELECT chunk_id FROM osha_document_chunks WHERE source_url=?",
+                                    (SOURCES[section],)).fetchall()
+            for old in old_chunks:
+                db.execute("DELETE FROM osha_vectors WHERE chunk_id=?", (old["chunk_id"],))
             db.execute("DELETE FROM osha_document_chunks WHERE source_url=?", (SOURCES[section],))
             for item in chunks:
                 db.execute(
@@ -186,6 +193,29 @@ def search(engine, query, limit=7):
     docs = [Counter(_tokens(r["text"])) for r in rows]
     df = Counter(t for d in docs for t in d)
     average = sum(sum(d.values()) for d in docs) / len(docs)
+    semantic = {}
+    retrieval = "BM25 over downloaded OSHA text"
+    # Optional dense retrieval, without requiring pgvector or any cloud
+    # provisioning. The official source text stays in the existing DB.
+    from crs.model_gateway import embeddings_configured, embed_texts, ModelError
+    if embeddings_configured():
+        with engine._db() as db:
+            vector_rows = db.execute(
+                "SELECT chunk_id,vector_json FROM osha_vectors WHERE model=?",
+                (__import__("os").environ["CRS_EMBEDDING_MODEL"],)).fetchall()
+        if vector_rows:
+            try:
+                query_vector = embed_texts([query[:2000]])[0]
+                query_mag = math.sqrt(sum(x*x for x in query_vector))
+                for saved in vector_rows:
+                    vector = json.loads(saved["vector_json"])
+                    if len(vector) == len(query_vector):
+                        mag = math.sqrt(sum(x*x for x in vector))
+                        if mag and query_mag:
+                            semantic[saved["chunk_id"]] = sum(a*b for a,b in zip(query_vector, vector)) / (mag*query_mag)
+                retrieval = "Hybrid BM25 + opt-in dense embeddings"
+            except (ModelError, ValueError, TypeError):
+                retrieval = "BM25 (embedding request failed; semantic ranking unavailable)"
     ranked = []
     for row, freqs in zip(rows, docs):
         length = max(1, sum(freqs.values()))
@@ -197,10 +227,41 @@ def search(engine, query, limit=7):
                 score += idf * (f * 2.2) / (f + 1.2 * (0.25 + 0.75 * length / max(1, average)))
         if row["section_id"] in query:
             score += 4
+        if row["chunk_id"] in semantic:
+            # Use a modest bounded semantic boost; lexical matches remain visible.
+            score += 2.5 * max(0.0, semantic[row["chunk_id"]])
         if score > 0:
             ranked.append((score, row))
     ranked.sort(key=lambda pair: (-pair[0], pair[1]["chunk_id"]))
     return {"ready": True, "indexed_chunks": len(rows),
-            "retrieval": "BM25 over downloaded official OSHA HTML text",
+            "retrieval": retrieval,
             "matches": [{**r, "score": round(s, 5)} for s, r in ranked[:limit]],
             "warning": "Research evidence only; confirm legal applicability, currency, and state requirements"}
+
+
+def build_embeddings(engine, limit=16):
+    """Index one limited batch at a time. Requires an approved embeddings service."""
+    from crs.model_gateway import embeddings_configured, embed_texts, ModelError
+    import os
+    if not embeddings_configured():
+        raise ModelError("CRS_EMBEDDING_MODEL must be configured on the server")
+    if type(limit) is not int or not 1 <= limit <= 16:
+        raise ValueError("Embedding batch limit must be 1 to 16")
+    model = os.environ["CRS_EMBEDDING_MODEL"]
+    with engine._db() as db:
+        _init(db)
+        rows = [dict(r) for r in db.execute(
+            "SELECT c.chunk_id,c.text FROM osha_document_chunks c "
+            "LEFT JOIN osha_vectors v ON c.chunk_id=v.chunk_id AND v.model=? "
+            "WHERE v.chunk_id IS NULL ORDER BY c.chunk_id LIMIT ?",
+            (model,limit)).fetchall()]
+    if not rows:
+        return {"indexed": 0, "model": model}
+    embeddings = embed_texts([r["text"][:2000] for r in rows])
+    with engine._db() as db:
+        for row, vector in zip(rows, embeddings):
+            db.execute("INSERT INTO osha_vectors VALUES (?,?,?) "
+                       "ON CONFLICT(chunk_id) DO UPDATE SET "
+                       "model=excluded.model,vector_json=excluded.vector_json",
+                       (row["chunk_id"], model, json.dumps(vector)))
+    return {"indexed": len(rows), "model": model}
