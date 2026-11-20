@@ -12,6 +12,8 @@ from html import unescape
 from math import log
 from pathlib import Path
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+from xml.etree import ElementTree as ET
 import argparse
 import json
 import os
@@ -102,6 +104,7 @@ def parse_official_html(html, citation, url):
 
 def ingest(output=DEFAULT_PATH, fetch=None):
     """Download nine fixed official OSHA pages and write an atomic snapshot."""
+    custom_fetch = fetch is not None
     if fetch is None:
         def fetch(url):
             request = Request(url, headers={"User-Agent": "SiteObserver-Research/1.0 (OSHA source archive)",
@@ -112,7 +115,14 @@ def ingest(output=DEFAULT_PATH, fetch=None):
                 return response.read(3_000_000).decode("utf-8", "replace")
     docs, sources = [], []
     for citation, url in SOURCES.items():
-        html = fetch(url)
+        try:
+            html = fetch(url)
+        except (HTTPError, URLError):
+            if custom_fetch:
+                raise
+            # GitHub runners may receive 403 from OSHA HTML. GovInfo hosts the
+            # same federal regulations in official eCFR bulk XML.
+            return ingest_from_govinfo(output)
         chunks = parse_official_html(html, citation, url)
         docs.extend(chunks)
         sources.append({"citation": citation, "url": url,
@@ -186,6 +196,94 @@ class OSHAIndex:
         return {"mode": "osha_source_text", "chunks": chunks,
                 "retrieved_at": self.snapshot["retrieved_at"],
                 "warning": "Source snapshot may be outdated. Expert verification is required."}
+
+
+def ingest_from_govinfo(output=DEFAULT_PATH, download=None):
+    """Fallback to the government-published, full Title 29 eCFR XML archive.
+
+    Only 1926.650 to 1926.652 and Appendix A-F for Subpart P are indexed.
+    Each source paragraph carries a section/subparagraph citation where known.
+    """
+    url = "https://www.govinfo.gov/bulkdata/ECFR/title-29/ECFR-title29.xml"
+    if download is None:
+        request = Request(url, headers={"User-Agent": "SiteObserver-Research/1.0",
+                                        "Accept": "application/xml"})
+        with urlopen(request, timeout=90) as response:
+            if response.status != 200:
+                raise ValueError("GovInfo eCFR source unavailable")
+            data = response.read(45_000_001)
+            if len(data) > 45_000_000:
+                raise ValueError("GovInfo XML exceeds ingestion limit")
+    else:
+        data = download(url)
+    root = ET.fromstring(data)
+    chunks, source_pages = [], {}
+    wanted = {"1926.650", "1926.651", "1926.652"}
+
+    for node in root.iter():
+        kind = node.get("TYPE", "").upper()
+        number = node.get("N", "")
+        if kind == "SECTION":
+            section = re.search(r"1926\.(650|651|652)\b", number)
+            if not section:
+                continue
+            section = section.group(0)
+            source_url = SOURCES[section]
+            source_pages[section] = source_url
+            context = []
+            section_paragraphs = list(node.iter("P"))
+            # Some eCFR exports use direct text when P is absent.
+            if not section_paragraphs:
+                section_paragraphs = [node]
+            for paragraph in section_paragraphs:
+                plain = _normal(" ".join(paragraph.itertext()))
+                if len(plain) < 15:
+                    continue
+                prefix = re.match(r"^((?:\([a-zA-Z0-9]+\))+)", plain)
+                if prefix:
+                    labels = re.findall(r"\(([a-zA-Z0-9]+)\)", prefix.group(1))
+                    for part in labels:
+                        level = (0 if len(part) == 1 and part.islower() and not part.isdigit()
+                                 else 1 if part.isdigit()
+                                 else 2 if re.fullmatch(r"i|ii|iii|iv|v|vi|vii|viii|ix|x", part)
+                                 else 3)
+                        context = context[:level] + [part]
+                citation = section + "".join(f"({x})" for x in context)
+                for piece in _split(plain):
+                    chunks.append({"citation": citation, "chunk": len(chunks), "text": piece,
+                                   "source_url": source_url, "parent": section})
+        elif kind == "APPENDIX":
+            head = " ".join("".join(tag.itertext()) for tag in node.findall("HEAD"))
+            found = re.search(r"Appendix\s+([A-F])\s+to\s+Subpart\s+P", head, re.I)
+            if not found or "1926" not in head:
+                continue
+            key = f"1926 Subpart P App {found.group(1).upper()}"
+            source_url = SOURCES[key]
+            source_pages[key] = source_url
+            text = _normal(" ".join(node.itertext()))
+            for piece in _split(text):
+                chunks.append({"citation": key, "chunk": len(chunks), "text": piece,
+                               "source_url": source_url, "parent": key})
+
+    sections_found = {c["parent"] for c in chunks if c["parent"] in wanted}
+    if sections_found != wanted or len(chunks) < 40:
+        raise ValueError("Incomplete official GovInfo excavation source; refusing partial corpus")
+    for chunk in chunks:
+        chunk["id"] = sha256((chunk["citation"] + str(chunk["chunk"]) +
+                              chunk["text"]).encode()).hexdigest()[:20]
+        chunk["sha256"] = sha256(chunk["text"].encode()).hexdigest()
+    snapshot = {"authority": "29 CFR 1926 Subpart P (GovInfo eCFR bulk XML)",
+                "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                "source_pages": [{"citation": k, "url": v} for k, v in source_pages.items()],
+                "source_archive": url, "archive_sha256": sha256(data).hexdigest(),
+                "chunks": chunks, "schema": 1,
+                "disclaimer": "Official eCFR research snapshot; verify the current regulatory text."}
+    path = Path(output)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".tmp")
+    temp.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp.replace(path)
+    return snapshot
 
 
 if __name__ == "__main__":
