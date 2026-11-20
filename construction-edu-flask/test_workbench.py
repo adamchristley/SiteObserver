@@ -167,3 +167,22 @@ def test_appendix_source_is_identified():
     chunks = parse_osha_html(html, "AppA", SOURCES["AppA"])
     assert len(chunks) >= 2
     assert all(x["citation"] == "29 CFR 1926 Subpart P Appendix A" for x in chunks)
+
+
+def test_private_ex01_replay_reports_without_raw_dialogue(wb):
+    from evaluate_ex01 import run_cases
+    ingest(wb.engine, ["1926.651"], lambda url: html_for("1926.651").encode())
+    test_rows = [
+        {"Turn ID":"EX-01-A0","Dialogue Name":"A","User Input":"A 6-foot trench.",
+         "OSHA Citations":"29 CFR 1926.651(c)(2)", "Expected Status":"Insufficient Information"},
+        {"Turn ID":"EX-01-A1","Dialogue Name":"A","User Input":"The trench is now 4 feet deep.",
+         "OSHA Citations":"29 CFR 1926.651(c)(2)", "Expected Status":"Pending Verification"},
+        {"Turn ID":"EX-01-B0","Dialogue Name":"B","User Input":"A new 5-foot trench.",
+         "OSHA Citations":"29 CFR 1926.651(k)(1)", "Expected Status":"Insufficient Information"},
+    ]
+    out = run_cases(test_rows, wb)
+    assert out["summary"]["turns"] == 3
+    assert out["summary"]["successful_turns"] == 3
+    assert out["turns"][1]["version"] == 2
+    assert out["turns"][2]["version"] == 1
+    assert all("User Input" not in str(record) for record in out["turns"])
