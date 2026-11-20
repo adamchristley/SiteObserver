@@ -40,6 +40,9 @@ CREATE INDEX IF NOT EXISTS ix_osha_source ON osha_document_chunks(source_url);
 CREATE TABLE IF NOT EXISTS osha_vectors (
  chunk_id TEXT PRIMARY KEY, model TEXT NOT NULL, vector_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS osha_source_versions (
+ source_url TEXT PRIMARY KEY, active_sha256 TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 """
 
 class _Text(HTMLParser):
@@ -152,14 +155,16 @@ def ingest(engine, sections=None, fetch=None):
         chunks = download_section(section, fetch)
         with engine._db() as db:
             _init(db)
-            old_chunks = db.execute("SELECT chunk_id FROM osha_document_chunks WHERE source_url=?",
-                                    (SOURCES[section],)).fetchall()
-            for old in old_chunks:
-                db.execute("DELETE FROM osha_vectors WHERE chunk_id=?", (old["chunk_id"],))
-            db.execute("DELETE FROM osha_document_chunks WHERE source_url=?", (SOURCES[section],))
+            # Retain prior snapshots for auditable decision evidence. Only the
+            # active source hash participates in current retrieval.
+            db.execute("INSERT INTO osha_source_versions VALUES (?,?,?) "
+                       "ON CONFLICT(source_url) DO UPDATE SET "
+                       "active_sha256=excluded.active_sha256,updated_at=excluded.updated_at",
+                       (SOURCES[section], chunks[0]["source_sha256"], chunks[0]["ingested_at"]))
             for item in chunks:
                 db.execute(
-                    "INSERT INTO osha_document_chunks VALUES (?,?,?,?,?,?,?)",
+                    "INSERT INTO osha_document_chunks VALUES (?,?,?,?,?,?,?) "
+                    "ON CONFLICT(chunk_id) DO NOTHING",
                     (item["chunk_id"], item["source_url"], item["section_id"],
                      item["citation"], item["text"], item["source_sha256"], item["ingested_at"]))
         completed.append({"section_id": section, "chunks": len(chunks),
@@ -169,9 +174,11 @@ def ingest(engine, sections=None, fetch=None):
 def sources(engine):
     with engine._db() as db:
         _init(db)
-        rows = db.execute("SELECT section_id, source_url, source_sha256, ingested_at, "
-                          "COUNT(*) AS chunks FROM osha_document_chunks "
-                          "GROUP BY section_id, source_url, source_sha256, ingested_at "
+        rows = db.execute("SELECT c.section_id, c.source_url, c.source_sha256, c.ingested_at, "
+                          "COUNT(*) AS chunks FROM osha_document_chunks c "
+                          "JOIN osha_source_versions v ON c.source_url=v.source_url "
+                          "AND c.source_sha256=v.active_sha256 "
+                          "GROUP BY c.section_id, c.source_url, c.source_sha256, c.ingested_at "
                           "ORDER BY section_id").fetchall()
         return [dict(r) for r in rows]
 
@@ -183,8 +190,10 @@ def search(engine, query, limit=7):
     with engine._db() as db:
         _init(db)
         rows = [dict(r) for r in db.execute(
-            "SELECT chunk_id, source_url, section_id, citation, text, source_sha256, ingested_at "
-            "FROM osha_document_chunks ORDER BY chunk_id").fetchall()]
+            "SELECT c.chunk_id, c.source_url, c.section_id, c.citation, c.text, c.source_sha256, c.ingested_at "
+            "FROM osha_document_chunks c JOIN osha_source_versions v "
+            "ON c.source_url=v.source_url AND c.source_sha256=v.active_sha256 "
+            "ORDER BY c.chunk_id").fetchall()]
     if not rows:
         return {"ready": False, "matches": [], "indexed_chunks": 0, "warning": "Official OSHA documents must be ingested first"}
     terms = _tokens(query)
@@ -252,6 +261,8 @@ def build_embeddings(engine, limit=16):
         _init(db)
         rows = [dict(r) for r in db.execute(
             "SELECT c.chunk_id,c.text FROM osha_document_chunks c "
+            "JOIN osha_source_versions sv ON c.source_url=sv.source_url "
+            "AND c.source_sha256=sv.active_sha256 "
             "LEFT JOIN osha_vectors v ON c.chunk_id=v.chunk_id AND v.model=? "
             "WHERE v.chunk_id IS NULL ORDER BY c.chunk_id LIMIT ?",
             (model,limit)).fetchall()]
