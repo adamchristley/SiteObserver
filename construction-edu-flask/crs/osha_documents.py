@@ -91,7 +91,7 @@ def parse_osha_html(html: str, section_id: str, source_url: str, when=None):
     for line in lines:
         if len(line) > 4000:
             line = line[:4000]
-        if current and (len(" ".join(current)) + len(line) > 1000 or (HEADING.match(line) and len(" ".join(current)) > 90)):
+        if current and (len(" ".join(current)) + len(line) > 1000 or (HEADING.match(line) and len(" ".join(current)) > 90) or (len(line) > 75 and len(" ".join(current)) > 65)):
             blocks.append(" ".join(current))
             current = []
         current.append(line)
