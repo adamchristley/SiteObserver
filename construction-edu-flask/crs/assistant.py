@@ -33,6 +33,13 @@ CREATE TABLE IF NOT EXISTS crs_dynamic_edges (
 );
 CREATE INDEX IF NOT EXISTS ix_dynamic_recheck
   ON crs_dynamic_edges(scenario_id, branch, condition_key);
+CREATE TABLE IF NOT EXISTS crs_dynamic_decisions (
+  scenario_id TEXT NOT NULL, branch TEXT NOT NULL, decision_id TEXT NOT NULL,
+  status TEXT NOT NULL, rationale TEXT NOT NULL, citations_json TEXT NOT NULL,
+  evaluated_version INTEGER NOT NULL, evaluation_count INTEGER NOT NULL,
+  review_status TEXT NOT NULL,
+  PRIMARY KEY (scenario_id, branch, decision_id)
+);
 """
 VALID_STATUS = {"Insufficient Information", "Pending Verification",
                 "Not Approved", "Requires Expert Review"}
@@ -123,6 +130,33 @@ def _grounded_edges(raw, conditions, citations):
     return valid
 
 
+def _grounded_decisions(raw, present_conditions, citations):
+    """Accept only model candidate decisions that cite retrieved source passages."""
+    results = []
+    if not isinstance(raw, list):
+        return results
+    for item in raw[:20]:
+        if not isinstance(item, dict):
+            continue
+        decision_id = item.get("decision_id")
+        dependencies = item.get("condition_keys", [])
+        evidence = item.get("citations", [])
+        status = item.get("status")
+        if (not isinstance(decision_id, str) or not IDENTIFIER.fullmatch(decision_id)
+                or decision_id in RULES or status not in
+                {"undetermined", "noncompliant", "requires_review"}
+                or not isinstance(dependencies, list) or not isinstance(evidence, list)):
+            continue
+        fields = [key for key in dependencies if key in present_conditions and key in ALL_FIELDS]
+        trusted = [citation for citation in evidence if citation in citations]
+        if not fields or not trusted:
+            continue
+        results.append({"decision_id": decision_id, "status": status,
+                        "rationale": str(item.get("rationale", ""))[:1000],
+                        "citations": trusted[:10], "condition_keys": list(dict.fromkeys(fields))})
+    return results
+
+
 class CRSAssistant:
     def __init__(self, engine, index=None, infer=None):
         self.engine = engine
@@ -153,7 +187,7 @@ class CRSAssistant:
             "answer (cautious concise analysis), status (one of Insufficient Information, "
             "Pending Verification, Not Approved, Requires Expert Review), citations "
             "(exact citation strings from sources), dependencies "
-            "(list of objects containing decision_id, condition_key, citation). "
+            "(list of objects containing decision_id, condition_key, citation), and decisions (list of objects with decision_id, status, rationale, citations, condition_keys). Decision statuses must be undetermined, noncompliant, or requires_review. Never use compliant as an LLM decision status. "
             "If a fact is unknown, omit it from conditions. "
             "Use the following permitted condition keys: " + ", ".join(sorted(ALL_FIELDS))
         )
@@ -198,17 +232,35 @@ class CRSAssistant:
                 status = suggestion.get("status")
                 if status not in VALID_STATUS:
                     status = "Requires Expert Review"
+                    answer = "The model response cannot authorize work. Researcher review is required."
+                if re.search(r"\b(approved for work|safe to proceed|safe to enter|certified compliant)\b",
+                             answer, re.I):
+                    answer = "The model attempted to issue an unsupported safety approval. Expert review required."
+                    status = "Requires Expert Review"
                 model_mode = "azure_openai"
-                proposals = _grounded_edges(suggestion.get("dependencies"), conditions, citations)
+                present = {**(previous["conditions"] if previous else {}), **conditions}
+                citations = list(dict.fromkeys(citations + [
+                    source.get("citation", source.get("id"))
+                    for source in (retrieved.get("chunks", []) or retrieved.get("catalog_matches", []))
+                    if source.get("citation", source.get("id"))]))
+                proposals = _grounded_edges(suggestion.get("dependencies"), present, citations)
+                candidates = _grounded_decisions(suggestion.get("decisions"), present, citations)
+                for candidate in candidates:
+                    for key in candidate["condition_keys"]:
+                        edge = {"decision_id": candidate["decision_id"], "condition_key": key,
+                                "citation": candidate["citations"][0],
+                                "source": "llm", "review_status": "proposed"}
+                        if edge not in proposals:
+                            proposals.append(edge)
             except RuntimeError as exc:
                 warnings.append(str(exc))
                 suggestion = {}
                 conditions = {}
-                conflicts, citations, proposals = [], [], []
+                conflicts, citations, proposals, candidates = [], [], [], []
                 answer, status, model_mode = "", "Insufficient Information", "rule_based"
         else:
             conditions = {}
-            conflicts, citations, proposals = [], [], []
+            conflicts, citations, proposals, candidates = [], [], [], []
             answer, status, model_mode = "", "Insufficient Information", "rule_based"
             warnings.append("Azure OpenAI is not configured; only deterministic fact extraction and retrieval are available.")
 
@@ -258,6 +310,35 @@ class CRSAssistant:
                         "INSERT OR IGNORE INTO crs_dynamic_edges VALUES (?,?,?,?,?,?,?)",
                         (scenario_id, branch, edge["decision_id"], edge["condition_key"],
                          edge["citation"], edge["review_status"], edge["source"]))
+                for candidate in candidates:
+                    name = candidate["decision_id"]
+                    old = db.execute(
+                        "SELECT evaluation_count FROM crs_dynamic_decisions WHERE "
+                        "scenario_id=? AND branch=? AND decision_id=?",
+                        (scenario_id, branch, name)).fetchone()
+                    # On updates, only affected candidate decisions get reevaluated.
+                    if old and name not in flagged:
+                        continue
+                    if old:
+                        db.execute(
+                            "UPDATE crs_dynamic_decisions SET status=?, rationale=?, "
+                            "citations_json=?, evaluated_version=?, evaluation_count=?, "
+                            "review_status=? WHERE scenario_id=? AND branch=? AND decision_id=?",
+                            (candidate["status"], candidate["rationale"],
+                             json.dumps(candidate["citations"]), version,
+                             old["evaluation_count"] + 1, "needs_review",
+                             scenario_id, branch, name))
+                    else:
+                        db.execute(
+                            "INSERT INTO crs_dynamic_decisions VALUES (?,?,?,?,?,?,?,?,?)",
+                            (scenario_id, branch, name, candidate["status"],
+                             candidate["rationale"], json.dumps(candidate["citations"]),
+                             version, 1, "proposed"))
+                for name in flagged:
+                    db.execute(
+                        "UPDATE crs_dynamic_decisions SET review_status=? WHERE "
+                        "scenario_id=? AND branch=? AND decision_id=?",
+                        ("needs_review", scenario_id, branch, name))
         else:
             version = 0
 
@@ -266,7 +347,7 @@ class CRSAssistant:
             "cited_osha": [r for r in (retrieved.get("chunks", []) or retrieved.get("catalog_matches", []))
                            if (r.get("citation", r.get("id")) in citations)],
             "citations": citations, "conditions_extracted": conditions,
-            "conflicts": conflicts, "dependency_proposals": proposals,
+            "conflicts": conflicts, "dependency_proposals": proposals, "candidate_decisions": candidates,
             "candidate_decisions_flagged": flagged,
             "warnings": warnings + ([retrieved["warning"]] if retrieved.get("warning") else []),
             "scenario": scenario, "retrieval_mode": retrieved.get("mode"),
@@ -302,7 +383,15 @@ class CRSAssistant:
             {"decision_id": name, "condition_key": key, "source": "rule_based", "review_status": "defined"}
             for name, rule in RULES.items() for key in rule["dependencies"]
         ]
+            candidates = db.execute(
+                "SELECT decision_id, status, rationale, citations_json, evaluated_version, "
+                "evaluation_count, review_status FROM crs_dynamic_decisions "
+                "WHERE scenario_id=? AND branch=?",
+                (scenario_id, branch)).fetchall()
         return {"scenario_id": scenario_id, "branch": branch, "version": scenario["version"],
                 "deterministic_edges": deterministic,
                 "proposed_edges": [dict(p) for p in proposals],
+                "candidate_decisions": [
+                    {**dict(c), "citations": json.loads(c["citations_json"])}
+                    for c in candidates],
                 "warning": "Model-proposed edges do not modify the certified deterministic rule definitions."}
