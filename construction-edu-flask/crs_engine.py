@@ -78,6 +78,22 @@ BOOL_FIELDS = {
 }
 NUMBER_FIELDS = {'depth_ft', 'spoil_distance_ft'}
 ENUM_FIELDS = {'protective_system': {'none', 'present_unverified', 'verified'}}
+# Additional factual fields used by the human-reviewed research dialogues.
+# They do not silently change the existing six deterministic OSHA checks.
+BOOL_FIELDS.update({
+    'shield_removed', 'worker_outside_shield', 'shield_moving',
+    'workers_in_trench_during_shield_movement', 'workers_exited_before_movement',
+    'shield_rating_verified', 'shield_coverage_verified', 'shield_capacity_verified',
+    'shield_configuration_verified', 'ladder_distance_verified',
+    'ladder_distance_conflicted', 'inspection_after_change',
+    'competent_person_cave_in_indication',
+})
+NUMBER_FIELDS.update({
+    'shield_count', 'ladder_lateral_distance_ft', 'excavation_length_ft',
+    'excavation_width_ft',
+})
+ENUM_FIELDS['soil_type'] = {'A', 'B', 'C', 'unknown'}
+
 ALL_FIELDS = BOOL_FIELDS | NUMBER_FIELDS | set(ENUM_FIELDS)
 
 
