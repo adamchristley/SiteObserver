@@ -29,7 +29,8 @@ function renderSources(sources){
 async function status(){
   const s=await api("/api/workbench/status");state.cases=s.cases||[];
   renderSources(s.documents||[]);
-  $("modelStatus").textContent=s.model_configured?"Configured":"Not configured";
+  $("modelStatus").textContent=s.model_configured?(s.embedding_configured?"Chat + vectors":"Chat ready"):"Not configured";
+  $("embed").disabled=!s.embedding_configured;
   clear($("casePicker"));const opt=elt("option",null,"Select a saved case");opt.value="";$("casePicker").append(opt);
   const seen=new Set();
   for(const c of state.cases){if(seen.has(c.scenario_id))continue;seen.add(c.scenario_id);
@@ -123,3 +124,8 @@ $("search").onclick=()=>go(async()=>{const query=$("searchText").value.trim();if
   for(const x of d.matches){const node=elt("div","result");link(node,x.source_url,x.citation);addText(node,"p",x.text);addText(node,"small","Source SHA-256: "+x.source_sha256.slice(0,16)+" · Chunk "+x.chunk_id);$("searchResults").append(node);}
 });
 go(async()=>{try{const a=await api("/api/workbench/session");state.csrf=a.csrf;showWorkspace();await status()}catch(e){showLogin()}});
+
+$("embed").onclick=()=>go(async()=>{
+  const result=await api("/api/workbench/embed","POST",{limit:16});
+  flash("Embedded "+result.indexed+" passages using "+result.model+". Repeat until 0 remain.");
+});
