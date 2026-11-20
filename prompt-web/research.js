@@ -129,3 +129,16 @@ $("embed").onclick=()=>go(async()=>{
   const result=await api("/api/workbench/embed","POST",{limit:16});
   flash("Embedded "+result.indexed+" passages using "+result.model+". Repeat until 0 remain.");
 });
+
+$("appendices").onclick=()=>go(async()=>{
+  const button=$("appendices");button.disabled=true;button.textContent="Downloading official appendices...";
+  try{
+    for(const sections of [["AppA","AppB","AppC"],["AppD","AppE","AppF"]]){
+      const result=await api("/api/workbench/ingest","POST",{sections});
+      flash("Indexed "+sections.join(", ")+" with "+result.ingested.reduce((n,x)=>n+x.chunks,0)+" passages");
+    }
+    await status();
+  } finally {
+    button.disabled=false;button.textContent="Download and index Appendices A–F";
+  }
+});
