@@ -8,9 +8,12 @@ from pathlib import Path
 from uuid import uuid4
 import hmac
 import os
+import secrets
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, session
 from crs.pipeline import create_from_text, revise_from_text
+from crs.assistant import CRSAssistant, model_available
+from crs.document_rag import OSHAIndex
 from crs.osha_retriever import retrieve_osha, catalogue_versions
 from crs_engine import (CRSEngine, CRSInputError, CRSNotFound, CRSVersionConflict,
                         RULES, validate_changes)
@@ -19,7 +22,10 @@ WEB = Path(__file__).resolve().parent / 'prompt-web'
 if not WEB.is_dir():
     WEB = Path(__file__).resolve().parent.parent / 'prompt-web'
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 8192
+app.config['MAX_CONTENT_LENGTH'] = 16384
+app.secret_key = os.environ.get('CRS_WEB_SESSION_KEY') or None
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=True,
+                  SESSION_COOKIE_SAMESITE='Strict', PERMANENT_SESSION_LIFETIME=3600)
 
 
 @app.after_request
@@ -93,8 +99,14 @@ def crs_protected(route):
         secret = os.environ.get('CRS_API_KEY', '')
         token = request.headers.get('Authorization', '')
         # Feature disabled unless explicitly configured. Do not expose user scenario data unauthenticated.
-        if not secret or not hmac.compare_digest(token, 'Bearer ' + secret):
+        bearer_ok = bool(secret and hmac.compare_digest(token, 'Bearer ' + secret))
+        web_ok = bool(app.secret_key and session.get('crs_research'))
+        if not bearer_ok and not web_ok:
             return jsonify({'error': 'CRS research endpoint is disabled or unauthorized'}), 403
+        if web_ok and not bearer_ok and request.method in ('POST', 'PATCH', 'PUT', 'DELETE'):
+            if not hmac.compare_digest(str(session.get('csrf', '')),
+                                       request.headers.get('X-CSRF-Token', '')):
+                return jsonify({'error': 'CSRF token required'}), 403
         if os.environ.get('CRS_REQUIRE_DURABLE_DB') == '1' and not os.environ.get('CRS_DATABASE_URL'):
             return jsonify({'error': 'Durable CRS database must be configured'}), 503
         try:
@@ -112,6 +124,67 @@ def json_payload():
     if not request.is_json or not isinstance(request.get_json(silent=True), dict):
         raise CRSInputError('JSON object required')
     return request.get_json()
+
+
+@app.post('/api/crs/web/login')
+def web_login():
+    password = os.getenv('CRS_WEB_PASSWORD', '')
+    if not password or not app.secret_key:
+        return jsonify({'error': 'Web login is disabled until server-side secrets are configured'}), 503
+    payload = json_payload()
+    submitted = payload.get('password', '')
+    if not isinstance(submitted, str) or not hmac.compare_digest(password, submitted):
+        return jsonify({'error': 'Invalid credentials'}), 403
+    session.clear()
+    session.permanent = True
+    session['crs_research'] = True
+    session['csrf'] = secrets.token_urlsafe(32)
+    return jsonify({'authenticated': True, 'csrf_token': session['csrf']})
+
+
+@app.get('/api/crs/web/session')
+def web_session():
+    ok = bool(app.secret_key and session.get('crs_research'))
+    return jsonify({'authenticated': ok, 'csrf_token': session.get('csrf') if ok else None})
+
+
+@app.post('/api/crs/web/logout')
+def web_logout():
+    if not session.get('crs_research') or not hmac.compare_digest(
+            str(session.get('csrf', '')), request.headers.get('X-CSRF-Token', '')):
+        return jsonify({'error': 'Unauthorized'}), 403
+    session.clear()
+    return jsonify({'authenticated': False})
+
+
+@app.get('/api/crs/assistant/status')
+@crs_protected
+def assistant_status(engine):
+    del engine
+    return jsonify({'corpus': OSHAIndex().status(), 'model_configured': model_available(),
+                    'human_review_required': True})
+
+
+@app.post('/api/crs/assistant')
+@crs_protected
+def assistant_message(engine):
+    payload = json_payload()
+    response = CRSAssistant(engine).analyze(
+        payload.get('text'), payload.get('scenario_id'),
+        payload.get('branch', 'base'), payload.get('expected_version'))
+    return jsonify(response), (201 if response.get('scenario') and not payload.get('scenario_id') else 200)
+
+
+@app.get('/api/crs/assistant/<sid>/history')
+@crs_protected
+def assistant_history(engine, sid):
+    return jsonify(CRSAssistant(engine).history(sid, request.args.get('branch', 'base')))
+
+
+@app.get('/api/crs/assistant/<sid>/graph')
+@crs_protected
+def assistant_graph(engine, sid):
+    return jsonify(CRSAssistant(engine).graph(sid, request.args.get('branch', 'base')))
 
 
 @app.get('/api/crs/regulations')
