@@ -1,0 +1,32 @@
+name: Verify official OSHA document ingestion
+
+on:
+  push:
+    branches: ["feat/osha-rag-workbench"]
+    paths:
+      - ".github/workflows/osha-source-smoke.yml"
+      - "construction-edu-flask/crs/osha_documents.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch and inspect live federal OSHA source text
+        run: |
+          PYTHONPATH=construction-edu-flask python - <<'PY'
+          from crs.osha_documents import download_section
+          for section in ("1926.651", "AppA"):
+              chunks = download_section(section)
+              assert len(chunks) > 3
+              assert all(x["source_url"].startswith("https://www.osha.gov/") for x in chunks)
+              print(section, len(chunks), "chunks", "source SHA-256", chunks[0]["source_sha256"][:16])
+          PY
