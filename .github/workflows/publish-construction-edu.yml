@@ -44,6 +44,10 @@ jobs:
         run: |
           python -m pip install Flask==3.1.1 pytest 'psycopg[binary]>=3.2,<4'
           python -m pytest -q construction-edu-flask/test_app.py construction-edu-flask/test_crs.py construction-edu-flask/test_postgres.py construction-edu-flask/test_nl_pipeline.py construction-edu-flask/test_osha_retrieval.py construction-edu-flask/test_layer5_hazards.py construction-edu-flask/test_workbench.py
+      - name: Validate research browser JavaScript
+        run: node --check prompt-web/research.js
+      - name: Build candidate research container
+        run: docker build -f construction-edu-flask/Dockerfile -t siteobserver-research-ci .
   publish:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
