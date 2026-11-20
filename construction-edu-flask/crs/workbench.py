@@ -186,7 +186,7 @@ class Workbench:
     def _assess(self, sid, branch, text, core, extra, old, affected):
         if not configured():
             return []
-        query = text + " " + " ".join(str(k) + " " + str(v)
+        query = "OSHA excavation protective systems " + text + " " + " ".join(str(k) + " " + str(v)
                                     for k, v in core["conditions"].items())
         retrieval = document_search(self.engine, query[:4000])
         if not retrieval["ready"]:
