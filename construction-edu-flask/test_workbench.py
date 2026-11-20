@@ -104,6 +104,11 @@ def test_model_citations_and_dynamic_graph_are_validated(wb, monkeypatch):
     assert result["changed_keys"] == ["shield_count"]
     assert result["reassessed_candidates"] == ["shield_coverage"]
     assert result["candidate_decisions"][0]["evaluation_count"] == 2
+    reviewed = wb.review(sid, "base", "shield_coverage", "accepted", "Dependencies inspected")
+    assert reviewed["candidate_decisions"][0]["review_state"] == "accepted"
+    assert reviewed["candidate_decisions"][0]["evidence_links"][0]["source_url"].startswith("https://www.osha.gov/")
+    with pytest.raises(CRSInputError):
+        wb.review(sid, "base", "shield_coverage", "compliant")
     assert "shield_coverage" in [x["decision_id"] for x in wb.branch(sid,"alt")["candidate_decisions"]]
     # Hallucinated evidence must be rejected, even when the rest is plausible.
     wrong = dict(answer["decisions"][0], citations=["fabricated"])
@@ -144,3 +149,16 @@ def test_browser_login_csrf_and_scenario_routes(wb, tmp_path, monkeypatch):
     hits = client.post("/api/workbench/search",
                        json={"query":"excavation worker protection"},headers=csrf)
     assert hits.status_code == 200 and hits.json["matches"]
+
+
+def test_appendix_source_is_identified():
+    html = ("<main><h1>Appendix A to Subpart P - Soil Classification</h1>"
+            "<p>Type C soil includes low strength cohesive soils and granular materials "
+            "requiring careful competent-person classification and evaluation.</p>"
+            "<p>A visual and manual analysis of the ground and excavation conditions "
+            "is required before choosing a protective system in relevant situations.</p>"
+            "<p>Changes in environmental conditions may require reclassification and "
+            "additional verification before site decisions are revised.</p></main>")
+    chunks = parse_osha_html(html, "AppA", SOURCES["AppA"])
+    assert len(chunks) >= 2
+    assert all(x["citation"] == "29 CFR 1926 Subpart P Appendix A" for x in chunks)
