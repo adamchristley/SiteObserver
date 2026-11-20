@@ -88,8 +88,11 @@ def test_model_citations_and_dynamic_graph_are_validated(wb, monkeypatch):
         "depends_on":["shield_count","depth_ft"],"citations":[citation]}]}
     def mock(messages):
         if "extract only explicit" in messages[0]["content"]:
+            if "Retraction:" in messages[1]["content"]:
+                return {"conditions": {}, "extra_facts":{"shield_count":None}}
             if "Correction:" in messages[1]["content"]:
-                return {"conditions": {}, "extra_facts":{"shield_count":1}}
+                return {"conditions": {}, "extra_facts":{"shield_count":1},
+                        "attributions":{"shield_count":"witness report"}}
             return {"conditions":{"is_trench":True,"depth_ft":18},
                     "extra_facts":{"shield_count":2}}
         return answer
@@ -115,6 +118,9 @@ def test_model_citations_and_dynamic_graph_are_validated(wb, monkeypatch):
     with pytest.raises(CRSInputError):
         wb.review(sid, "base", "shield_coverage", "compliant")
     assert "shield_coverage" in [x["decision_id"] for x in wb.branch(sid,"alt")["candidate_decisions"]]
+    retracted = wb.revise(sid, "Retraction: previous shield count cannot be confirmed.", 2)
+    assert "shield_count" not in retracted["extra_facts"]
+    assert "shield_count" in retracted["changed_keys"]
     # Hallucinated evidence must be rejected, even when the rest is plausible.
     wrong = dict(answer["decisions"][0], citations=["fabricated"])
     monkeypatch.setattr(gateway, "_call", lambda _: {"decisions":[wrong]})
