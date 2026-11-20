@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS wb_dependencies (
 );
 CREATE INDEX IF NOT EXISTS ix_wb_reverse_dependencies ON wb_dependencies
  (scenario_id, branch, dependency_type, dependency_key);
+CREATE TABLE IF NOT EXISTS wb_reviews (
+ scenario_id TEXT NOT NULL, branch TEXT NOT NULL, decision_id TEXT NOT NULL,
+ review_state TEXT NOT NULL, reviewer_note TEXT NOT NULL,
+ reviewed_at TEXT NOT NULL, PRIMARY KEY(scenario_id,branch,decision_id)
+);
 """
 
 def stamp():
@@ -80,9 +85,23 @@ class Workbench:
                                   "WHERE scenario_id=? AND branch=? AND decision_id=? "
                                   "ORDER BY dependency_type,dependency_key",
                                   (sid, branch, row["decision_id"])).fetchall()
+                citations = jsonvalue(row["citation_ids_json"])
+                review = db.execute("SELECT review_state,reviewer_note,reviewed_at FROM wb_reviews "
+                                    "WHERE scenario_id=? AND branch=? AND decision_id=?",
+                                    (sid, branch, row["decision_id"])).fetchone()
+                linked = []
+                for chunk_id in citations:
+                    link = db.execute("SELECT citation,source_url,source_sha256 FROM osha_document_chunks "
+                                      "WHERE chunk_id=?", (chunk_id,)).fetchone()
+                    if link:
+                        linked.append({"chunk_id": chunk_id, "citation": link["citation"],
+                                       "source_url": link["source_url"],
+                                       "source_sha256": link["source_sha256"]})
                 decisions.append({
                     "decision_id": row["decision_id"], "finding": row["finding"],
-                    "status": row["status"], "citations": jsonvalue(row["citation_ids_json"]),
+                    "status": row["status"], "citations": citations, "evidence_links": linked,
+                    "review_state": review["review_state"] if review else "pending",
+                    "reviewer_note": review["reviewer_note"] if review else "",
                     "depends_on": [d["dependency_key"] for d in deps if d["dependency_type"] == "condition"],
                     "evaluated_version": row["evaluated_version"],
                     "evaluation_count": row["evaluation_count"], "stale": bool(row["stale"]),
@@ -214,6 +233,8 @@ class Workbench:
                     "updated_at=excluded.updated_at",
                     (sid, branch, name, proposal["status"], proposal["finding"],
                      json.dumps(proposal["citations"]), version, count, 0, stamp()))
+                db.execute("DELETE FROM wb_reviews WHERE scenario_id=? AND branch=? AND decision_id=?",
+                           (sid, branch, name))
                 db.execute("DELETE FROM wb_dependencies WHERE scenario_id=? AND branch=? AND decision_id=?",
                            (sid, branch, name))
                 for key in proposal["depends_on"]:
@@ -240,3 +261,24 @@ class Workbench:
                     db.execute("INSERT INTO wb_dependencies VALUES (?,?,?,?,?)",
                                (sid, name, p["decision_id"], "regulation_chunk", chunk))
         return self.view(sid, name)
+
+    def review(self, sid, branch, decision_id, action, note=""):
+        """Review an LLM-proposed dependency set, never grant worksite approval."""
+        self._record(sid, branch)
+        if action not in ("accepted", "rejected"):
+            raise CRSInputError("Review action must be accepted or rejected")
+        if not isinstance(note, str) or len(note) > 500:
+            raise CRSInputError("Review note must be 500 characters or less")
+        with self.engine._db() as db:
+            row = db.execute("SELECT stale FROM wb_decisions WHERE scenario_id=? AND "
+                             "branch=? AND decision_id=?", (sid, branch, decision_id)).fetchone()
+            if row is None:
+                raise CRSInputError("No such model-proposed decision")
+            if row["stale"]:
+                raise CRSInputError("Stale proposals must be reassessed before review")
+            db.execute("INSERT INTO wb_reviews VALUES (?,?,?,?,?,?) "
+                       "ON CONFLICT(scenario_id,branch,decision_id) DO UPDATE SET "
+                       "review_state=excluded.review_state,reviewer_note=excluded.reviewer_note,"
+                       "reviewed_at=excluded.reviewed_at",
+                       (sid, branch, decision_id, action, note, stamp()))
+        return self.view(sid, branch)
