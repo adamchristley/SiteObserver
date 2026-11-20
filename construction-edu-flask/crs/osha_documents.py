@@ -20,6 +20,7 @@ SOURCES = {
     "1926.650": SECTION_BASE + "1926.650",
     "1926.651": SECTION_BASE + "1926.651",
     "1926.652": SECTION_BASE + "1926.652",
+    **{"App" + letter: SECTION_BASE + "1926SubpartPApp" + letter for letter in "ABCDEF"},
 }
 TOKEN = re.compile(r"[a-z0-9]+", re.I)
 STOP = set("the a an to and in or of for with on from is are was were as by be it that this at not which shall each must into than under who has have its their such other".split())
@@ -76,7 +77,9 @@ def parse_osha_html(html: str, section_id: str, source_url: str, when=None):
     reader.feed(html)
     raw = "\n".join(x.strip() for x in "".join(reader.parts).splitlines() if x.strip())
     # Begin at the first body occurrence of the regulation heading.
-    start = re.search(r"\b" + re.escape(section_id) + r"\s*[-–]\s*", raw)
+    start = (re.search(r"Appendix [A-F] to Subpart P", raw, re.I)
+             if section_id.startswith("App") else
+             re.search(r"\b" + re.escape(section_id) + r"\s*[-–]\s*", raw))
     if start:
         raw = raw[start.start():]
     if len(raw) < 150:
@@ -104,7 +107,9 @@ def parse_osha_html(html: str, section_id: str, source_url: str, when=None):
             continue
         # Explicit markers in original text are preferred; fall back to section.
         match = re.search(r"\b" + re.escape(section_id) + r"(?:\([a-z0-9iv]+\))+", text, re.I)
-        citation = ("29 CFR " + match.group()) if match else ("29 CFR " + section_id)
+        citation = (("29 CFR " + match.group()) if match else ("29 CFR " + section_id))
+        if section_id.startswith("App"):
+            citation = "29 CFR 1926 Subpart P Appendix " + section_id[-1]
         chunk_id = sha256((source_url + "|" + str(i) + "|" + text).encode()).hexdigest()[:24]
         output.append({"chunk_id": chunk_id, "source_url": source_url,
                        "section_id": section_id, "citation": citation,
