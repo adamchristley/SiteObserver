@@ -1,0 +1,53 @@
+name: Verify official OSHA document ingestion
+
+on:
+  push:
+    branches: ["feat/osha-rag-workbench"]
+    paths:
+      - ".github/workflows/osha-source-smoke.yml"
+      - "construction-edu-flask/crs/osha_documents.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Probe official federal regulatory document hosts
+        run: |
+          python - <<'PY'
+          from urllib.request import urlopen,Request
+          sources = [
+            "https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.651",
+            "https://www.govinfo.gov/content/pkg/CFR-2025-title29-vol8/xhtml/CFR-2025-title29-vol8-part1926-subpartP.html",
+            "https://www.govinfo.gov/content/pkg/CFR-2025-title29-vol8/xhtml/CFR-2025-title29-vol8-part1926.html",
+            "https://www.govinfo.gov/content/pkg/CFR-2025-title29-vol8/xml/CFR-2025-title29-vol8-part1926-subpartP.xml",
+            "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-29.xml?part=1926&subpart=P",
+            "https://www.govinfo.gov/bulkdata/ECFR/title-29/ECFR-title29.xml",
+          ]
+          for url in sources:
+              try:
+                  req = Request(url,headers={"User-Agent":"Mozilla/5.0","Accept":"text/html,application/xml"})
+                  with urlopen(req,timeout=10) as response:
+                      data=response.read(4096)
+                      print(response.status, response.url, "bytes",len(data),"sample",repr(data[:100]),flush=True)
+              except Exception as e:
+                  print(type(e).__name__,str(e)[:160],url,flush=True)
+          from xml.etree import ElementTree as ET
+          url="https://www.govinfo.gov/content/pkg/CFR-2025-title29-vol8/xml/CFR-2025-title29-vol8-part1926-subpartP.xml"
+          with urlopen(Request(url,headers={"User-Agent":"Mozilla/5.0"}),timeout=15) as response:
+              body=response.read(2_000_000)
+          print("GOVINFO XML bytes",len(body),flush=True)
+          root=ET.fromstring(body)
+          print("root",root.tag,"children",[(x.tag,x.attrib) for x in list(root)[:10]],flush=True)
+          for x in root.iter():
+              if x.tag in ("SECTION","APPENDIX","DIV8","DIV9"):
+                  print("element",x.tag,x.attrib,"sample",ET.tostring(x,encoding="unicode")[:850],flush=True)
+          PY
