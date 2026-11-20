@@ -90,10 +90,15 @@ class Workbench:
                                     "WHERE scenario_id=? AND branch=? AND decision_id=?",
                                     (sid, branch, row["decision_id"])).fetchone()
                 linked = []
+                outdated = False
                 for chunk_id in citations:
                     link = db.execute("SELECT citation,source_url,source_sha256 FROM osha_document_chunks "
                                       "WHERE chunk_id=?", (chunk_id,)).fetchone()
                     if link:
+                        active = db.execute("SELECT active_sha256 FROM osha_source_versions "
+                                            "WHERE source_url=?", (link["source_url"],)).fetchone()
+                        if not active or active["active_sha256"] != link["source_sha256"]:
+                            outdated = True
                         linked.append({"chunk_id": chunk_id, "citation": link["citation"],
                                        "source_url": link["source_url"],
                                        "source_sha256": link["source_sha256"]})
@@ -104,7 +109,8 @@ class Workbench:
                     "reviewer_note": review["reviewer_note"] if review else "",
                     "depends_on": [d["dependency_key"] for d in deps if d["dependency_type"] == "condition"],
                     "evaluated_version": row["evaluated_version"],
-                    "evaluation_count": row["evaluation_count"], "stale": bool(row["stale"]),
+                    "evaluation_count": row["evaluation_count"],
+                    "stale": bool(row["stale"] or outdated), "source_outdated": outdated,
                     "source": "llm_candidate", "human_review_required": True})
             return decisions
 
@@ -194,7 +200,7 @@ class Workbench:
                                    "AND decision_id=?", (sid, branch, row["decision_id"]))
         old = before["candidate_decisions"]
         affected = sorted({x["decision_id"] for x in old
-                           if set(x["depends_on"]) & changes})
+                           if set(x["depends_on"]) & changes or x.get("source_outdated")})
         assessment = self._assess(sid, branch, text, core, extra, old, affected)
         self._store_turn(sid, branch, new_version, text, parsed, assessment)
         result = self.view(sid, branch)
@@ -270,12 +276,20 @@ class Workbench:
         if not isinstance(note, str) or len(note) > 500:
             raise CRSInputError("Review note must be 500 characters or less")
         with self.engine._db() as db:
-            row = db.execute("SELECT stale FROM wb_decisions WHERE scenario_id=? AND "
+            row = db.execute("SELECT stale,citation_ids_json FROM wb_decisions WHERE scenario_id=? AND "
                              "branch=? AND decision_id=?", (sid, branch, decision_id)).fetchone()
             if row is None:
                 raise CRSInputError("No such model-proposed decision")
             if row["stale"]:
                 raise CRSInputError("Stale proposals must be reassessed before review")
+            for chunk_id in jsonvalue(row["citation_ids_json"]):
+                link = db.execute("SELECT source_url,source_sha256 FROM osha_document_chunks "
+                                  "WHERE chunk_id=?", (chunk_id,)).fetchone()
+                active = (db.execute("SELECT active_sha256 FROM osha_source_versions "
+                                     "WHERE source_url=?", (link["source_url"],)).fetchone()
+                          if link else None)
+                if not active or active["active_sha256"] != link["source_sha256"]:
+                    raise CRSInputError("OSHA document snapshot changed; reassess before review")
             db.execute("INSERT INTO wb_reviews VALUES (?,?,?,?,?,?) "
                        "ON CONFLICT(scenario_id,branch,decision_id) DO UPDATE SET "
                        "review_state=excluded.review_state,reviewer_note=excluded.reviewer_note,"
