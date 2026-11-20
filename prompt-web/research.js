@@ -43,7 +43,25 @@ function renderDecision(container, d, model){
   if(model)addText(div,"small","LLM candidate: human review required.");
   if(d.depends_on?.length)addText(div,"div","Depends on: "+d.depends_on.join(", "),"dep");
   if(!model&&d.evidence_states?.length)addText(div,"div","Condition dependencies: "+d.evidence_states.map(x=>x.condition).join(", "),"dep");
-  if(model&&d.citations?.length)addText(div,"div","Evidence chunk IDs: "+d.citations.join(", "),"dep");
+  if(model&&d.evidence_links?.length){
+    for(const source of d.evidence_links){const wrapper=elt("div","dep");link(wrapper,source.source_url,source.citation);addText(wrapper,"span"," · chunk "+source.chunk_id.slice(0,12));div.append(wrapper);}
+  }
+  if(model&&!d.evidence_links?.length&&d.citations?.length)addText(div,"div","Evidence chunks: "+d.citations.join(", "),"dep");
+  if(model){
+    const review=elt("div","dep");addText(review,"span","Dependency review: "+(d.review_state||"pending")+" (not a safety approval)");
+    for(const action of ["accepted","rejected"]){
+      const button=elt("button","secondary",action==="accepted"?"Approve dependencies":"Reject dependencies");
+      button.disabled=Boolean(d.stale);button.style.margin="6px 5px 0 0";
+      button.onclick=()=>go(async()=>{
+        const note=window.prompt("Reviewer note (this only reviews the candidate dependency mapping, not jobsite safety):","")||"";
+        render(await api("/api/workbench/scenarios/"+encodeURIComponent(state.sid)+"/review","POST",{
+          branch:state.branch,decision_id:d.decision_id,action,note
+        }));flash("Dependency review recorded");
+      });
+      review.append(button);
+    }
+    div.append(review);
+  }
   if(!model&&d.regulations?.length){for(const r of d.regulations){const block=elt("div","dep");link(block,r.source_url,r.id);div.append(block);}}
   addText(div,"small","Evaluations: "+(d.evaluation_count||1)+" · Last evaluated version: "+d.evaluated_version);
   container.append(div);
