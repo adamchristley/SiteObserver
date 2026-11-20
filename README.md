@@ -4,6 +4,25 @@
 
 > **Status: v0.2, local video analysis.** The synthetic site simulator remains available. Optional YOLO11 + ByteTrack can now analyze recorded footage. The pretrained model is not construction-specific, and no cloud resources have been deployed. **This is not a certified workplace safety system.**
 
+
+## CRS-RAG research workbench (November 2026)
+
+The repository also contains a separate **Flask/PostgreSQL research workbench**
+for scenario tracking, official OSHA excavation-source ingestion/retrieval,
+versioned decision dependency tracking, optional LLM-grounded candidate
+assessments, expert review of proposed dependency mappings, and a protected
+web interface. This is separate from the local-first vision/simulator track
+described below.
+
+- Architecture, limitations, deployment, model setup and tests:
+  [CRS-RAG Workbench](docs/CRS_RAG_WORKBENCH.md)
+- Browser route after deploying the new image: /research
+- Feature development: [PR #7](https://github.com/adamchristley/SiteObserver/pull/7)
+
+**Important:** This is not a certified OSHA compliance system or jobsite
+safety approval product. The model and source ingestion are opt-in, and any
+new cloud deployment must be deliberately configured and verified.
+
 ## Demo features
 
 - Interactive overhead site map with selectable workers, excavator, and haul truck.
