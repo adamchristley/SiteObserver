@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CRS-RAG Research Workbench | SiteObserver</title>
+  <link rel="stylesheet" href="/research.css">
+  <script src="/research.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="mark">S</span><div><strong>SiteObserver</strong><small>CRS-RAG Research Workbench</small></div></div>
+    <div class="toolbar"><span id="online" class="pill">Research prototype</span><button id="signout" class="ghost" hidden>Sign out</button></div>
+  </header>
+  <main>
+    <section id="login" class="login card">
+      <h1>Research access</h1>
+      <p>This workspace contains experimental assessments of construction scenarios. Authorized research use only.</p>
+      <form id="loginForm">
+        <label for="password">Research workspace password</label>
+        <input id="password" type="password" autocomplete="current-password" required>
+        <button type="submit" class="primary">Sign in</button>
+      </form>
+    </section>
+
+    <div id="workspace" hidden>
+      <div class="hero">
+        <div><span class="eyebrow">CONSTRUCTION SAFETY RESEARCH</span><h1>Scenario intelligence</h1><p>Trace site conditions to OSHA evidence and identify which decisions need reassessment when facts change.</p></div>
+        <div class="notice">Research only. Outputs are not OSHA clearance, engineering approval, or instructions to enter an excavation. Expert review is required.</div>
+      </div>
+
+      <div class="metrics">
+        <div class="stat card"><small>Regulatory sources indexed</small><strong id="sourcesCount">0</strong><span>Official OSHA sections</span></div>
+        <div class="stat card"><small>Language model</small><strong id="modelStatus">Not configured</strong><span>Evidence-grounded candidate review</span></div>
+        <div class="stat card"><small>Current scenario</small><strong id="scenarioVersion">None</strong><span id="scenarioBranch">Base state</span></div>
+      </div>
+
+      <div class="layout">
+        <section class="card pane">
+          <div class="sectionhead"><div><h2>Scenarios</h2><p>Start from a description or revisit an existing research case.</p></div></div>
+          <label for="casePicker">Recent cases</label><select id="casePicker"><option value="">Select a saved case</option></select>
+          <label for="startText">New scenario description</label>
+          <textarea id="startText" rows="6" placeholder="Workers are inside a 6-foot-deep trench in Type C soil. A trench shield is present, but its rating and coverage have not been confirmed."></textarea>
+          <button id="create" class="primary wide">Create scenario</button>
+          <div class="separator"></div>
+          <div class="sectionhead"><div><h2>OSHA source library</h2><p>Downloaded and indexed official text, with provenance.</p></div></div>
+          <ul id="sourcesList" class="sourceList"><li>No documents indexed yet</li></ul>
+          <button id="ingest" class="secondary wide">Download and index OSHA §§ 1926.650–652</button>
+          <p class="hint">Ingestion contacts OSHA.gov and stores source text in the research database. Use only when source review is authorized.</p>
+          <div class="separator"></div>
+          <h2>Document search</h2>
+          <label for="searchText">Search regulatory evidence</label>
+          <input id="searchText" placeholder="shields moving while workers are inside">
+          <button id="search" class="secondary wide">Search documents</button>
+          <div id="searchResults" class="results"></div>
+        </section>
+
+        <div class="rightcol">
+          <section class="card pane">
+            <div class="sectionhead"><div><h2>Scenario conversation</h2><p>New information updates the stored scenario and its dependencies.</p></div><span id="versionPill" class="pill">No scenario</span></div>
+            <div class="branchbar"><label for="branchPicker">Branch</label><select id="branchPicker"><option value="base">Base scenario</option></select><input id="branchName" placeholder="e.g. what_if_shield_move" aria-label="New branch name"><button id="fork" class="secondary">Create branch</button></div>
+            <div id="transcript" class="transcript"><div class="placeholder">Create or select a scenario to begin.</div></div>
+            <label for="followText">Question, correction, or new site condition</label>
+            <textarea id="followText" rows="3" placeholder="Correction: all workers will exit before the shield is moved. The final shield placement is not yet verified."></textarea>
+            <button id="send" class="primary" disabled>Submit update</button>
+            <p class="hint">For hypothetical changes, create a separate branch first. The original scenario remains unchanged.</p>
+          </section>
+
+          <section class="card pane">
+            <div class="sectionhead"><div><h2>Assessment & dependencies</h2><p>Deterministic checks are separate from unapproved LLM-generated findings.</p></div></div>
+            <div class="split"><div><h3>Structured conditions</h3><pre id="conditions">{}</pre></div><div><h3>Other reported facts</h3><pre id="extra">{}</pre></div></div>
+            <h3>Rule-based assessments</h3><div id="ruleDecisions" class="decisions"><div class="placeholder">No case loaded.</div></div>
+            <h3>LLM candidate assessments</h3><div id="candidateDecisions" class="decisions"><div class="placeholder">No model-generated findings.</div></div>
+            <div id="changeNote" class="changeNote"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+  <div id="flash" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
