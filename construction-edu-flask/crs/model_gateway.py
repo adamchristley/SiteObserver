@@ -5,6 +5,7 @@ cannot change the authoritative OSHA catalog or bypass the CRS rule engine.
 No API tokens, prompts or private scenario text are logged.
 """
 import json
+import math
 import os
 import re
 from urllib.parse import urlparse
@@ -165,3 +166,42 @@ def assess(message, conditions, extra_facts, retrieved, existing=None, affected=
                         "citations": sorted(set(cited)),
                         "human_review_required": True, "source": "llm_candidate"})
     return cleaned
+
+
+def embeddings_configured():
+    return bool(configured() and os.getenv("CRS_EMBEDDING_MODEL"))
+
+def embed_texts(texts):
+    """Return model-indexed vectors. Explicit opt-in, bounded batch, server-side only."""
+    if not embeddings_configured():
+        raise ModelError("No embedding model is configured")
+    if not isinstance(texts, list) or not 1 <= len(texts) <= 16:
+        raise ModelError("Embedding requests must contain 1 to 16 passages")
+    if any(not isinstance(x, str) or not 1 <= len(x) <= 2000 for x in texts):
+        raise ModelError("Invalid passage length")
+    base = os.environ["CRS_LLM_BASE_URL"].rstrip("/")
+    parsed = urlparse(base)
+    if parsed.scheme != "https" or not parsed.hostname or not base.endswith("/v1"):
+        raise ModelError("An HTTPS /v1 endpoint is required")
+    body = json.dumps({"model": os.environ["CRS_EMBEDDING_MODEL"], "input": texts}).encode()
+    req = Request(base + "/embeddings", data=body, method="POST",
+                  headers={"Authorization": "Bearer " + os.environ["CRS_LLM_API_KEY"],
+                           "Content-Type": "application/json"})
+    try:
+        with urlopen(req, timeout=40) as response:
+            result = json.loads(response.read(2_000_001))
+        output = sorted(result["data"], key=lambda d: d["index"])
+        if len(output) != len(texts):
+            raise ModelError("Embedding result count mismatch")
+        vectors = []
+        for item in output:
+            vector = item["embedding"]
+            if (not isinstance(vector, list) or not 2 <= len(vector) <= 4096 or
+                any(type(v) not in (int, float) or not math.isfinite(v) for v in vector)):
+                raise ModelError("Invalid model embedding")
+            vectors.append(vector)
+        return vectors
+    except ModelError:
+        raise
+    except Exception as exc:
+        raise ModelError("Embedding endpoint request failed") from exc
