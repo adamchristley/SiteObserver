@@ -124,7 +124,8 @@ def test_bad_model_fields_and_fake_citations_do_not_get_persisted(tmp_path):
     response = assistant.analyze("6 foot trench")
     assert response["status"] == "Requires Expert Review"
     assert "confirmed_safe" not in response["scenario"]["conditions"]
-    assert not response["citations"]
+    assert not response["model_citations"]
+    assert response["citation_attribution"] == "retrieval_only"
     assert not response["dependency_proposals"]
     assert any("Rejected" in w for w in response["warnings"])
 
@@ -210,7 +211,7 @@ def test_conflicted_model_depth_does_not_overwrite_factual_base(tmp_path):
     engine = CRSEngine(tmp_path / "conflict.sqlite3")
     def fake(messages):
         text = json.loads(messages[-1]["content"])["new_message"]
-        if "second report" in text:
+        if "second report" in text.lower():
             return {"conditions": {"depth_ft": 4},
                     "conflicts": ["depth_ft conflicting witness reports"],
                     "answer": "Measurements conflict.", "status": "Pending Verification",
