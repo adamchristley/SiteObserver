@@ -8,7 +8,7 @@ from functools import wraps
 from flask import jsonify, request, session
 
 from crs.model_gateway import ModelError, configured
-from crs.osha_documents import ingest, search, sources
+from crs.osha_documents import ingest, search, sources, build_embeddings
 from crs.workbench import Workbench
 from crs_engine import CRSInputError, CRSNotFound, CRSVersionConflict
 
@@ -89,7 +89,10 @@ def register_web_api(app):
     @authenticated
     def wb_status():
         w = Workbench()
-        return jsonify({"model_configured": configured(), "documents": sources(w.engine),
+        from crs.model_gateway import embeddings_configured
+        return jsonify({"model_configured": configured(),
+                        "embedding_configured": embeddings_configured(),
+                        "documents": sources(w.engine),
                         "cases": w.list_cases(), "human_review_required": True})
 
     @app.post("/api/workbench/ingest")
@@ -108,6 +111,11 @@ def register_web_api(app):
     def wb_search():
         data = payload()
         return jsonify(search(Workbench().engine, data.get("query"), data.get("limit", 7)))
+
+    @app.post("/api/workbench/embed")
+    @authenticated
+    def wb_embed():
+        return jsonify(build_embeddings(Workbench().engine, payload().get("limit", 16)))
 
     @app.post("/api/workbench/scenarios")
     @authenticated
