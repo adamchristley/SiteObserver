@@ -173,7 +173,8 @@ class OSHAIndex:
                 "chunks": len(self.docs), "source_pages": len(self.snapshot["source_pages"]) if self.snapshot else 0,
                 "reference_2025_chunks": len(self.reference),
                 "reference_2025_edition": "2025-07-01" if self.reference else None,
-                "retrieved_at": self.snapshot.get("retrieved_at") if self.snapshot else None}
+                "retrieved_at": self.snapshot.get("retrieved_at") if self.snapshot else None,
+                "historical_reference_only": bool(self.reference) and not bool(self.snapshot)}
 
     def search(self, query, limit=7):
         if not isinstance(query, str) or not query.strip() or len(query) > 4000:
@@ -209,7 +210,7 @@ class OSHAIndex:
         ranked.sort(key=lambda pair: (-pair[0], bool(pair[1].get("edition"))))
         chunks = [{**doc, "score": round(score, 4)} for score, doc in ranked[:limit]]
         return {"mode": "osha_source_text", "chunks": chunks,
-                "retrieved_at": self.snapshot["retrieved_at"],
+                "retrieved_at": self.snapshot.get("retrieved_at") if self.snapshot else None,
                 "warning": "Sources include a current retrieval snapshot and historical 2025 text; check edition and expert applicability."}
 
 
