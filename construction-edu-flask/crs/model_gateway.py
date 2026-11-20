@@ -134,7 +134,7 @@ def assess(message, conditions, extra_facts, retrieved, existing=None, affected=
                      "previous_decisions": existing or [], "impacted_decisions": affected or []
                  }, ensure_ascii=False)}])
     permitted = {x["chunk_id"] for x in chunks}
-    valid_facts = set(conditions) | set(extra_facts)
+    valid_facts = set(ALL_FIELDS) | set(conditions) | set(extra_facts)
     prior = {x.get("decision_id") for x in existing or []}
     expected = set(affected or [])
     decisions = raw.get("decisions") or []
@@ -156,7 +156,7 @@ def assess(message, conditions, extra_facts, retrieved, existing=None, affected=
             not isinstance(cited, list) or not cited or
             not isinstance(deps, list) or
             any(not isinstance(c, str) or c not in permitted for c in cited) or
-            any(not isinstance(k, str) or k not in valid_facts for k in deps)):
+            any(not isinstance(k, str) or (k not in valid_facts and not re.fullmatch(r"[a-z][a-z0-9_]{1,59}", k)) for k in deps)):
             continue
         if name in prior and name not in expected:
             continue
