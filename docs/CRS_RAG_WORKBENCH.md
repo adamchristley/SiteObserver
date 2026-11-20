@@ -16,7 +16,9 @@ session-authenticated endpoints and stores model proposals separately.
 6. Store proposed condition-to-decision dependencies in separate database tables.
    On changes, invalidate affected candidate decisions and selectively reevaluate.
 7. Support hypothetical branches, case history and scenario follow-ups.
-8. View all these components, OSHA evidence and structured assessments through
+8. Require an explicit approve/reject review of model-proposed dependency sets,
+   never an approval of construction safety; re-review on source revision.
+9. View all these components, OSHA evidence and structured assessments through
    the protected browser workspace.
 
 ## Trust boundaries and limitations
@@ -34,7 +36,9 @@ session-authenticated endpoints and stores model proposals separately.
 - The corpus is an explicitly downloaded timestamped snapshot. It is not a live
   regulatory update service, and state-plan requirements may differ.
 - Retrieval uses BM25 sparse text search against downloaded source passages.
-  An optional grounded LLM makes this RAG. Dense vector search is not yet included.
+  An optional Azure-compatible embeddings deployment adds dense similarity
+  and hybrid ranking without pgvector. Both features are opt-in and may incur
+  cloud API charges.
 - The workspace is shared behind an administrator password. It does not yet offer
   production multi-user identity, tenancy, access logs or rate limiting.
 - Do not send sensitive construction field, student, or personal information
@@ -74,6 +78,7 @@ supervisor approval:
 - CRS_LLM_BASE_URL: approved HTTPS API root ending in /openai/v1.
 - CRS_LLM_MODEL: exact deployment model name.
 - CRS_LLM_API_KEY: Azure Container App secret reference, never frontend code.
+- CRS_EMBEDDING_MODEL: optional, exact deployed embeddings model name.
 
 Example: https://YOUR-RESOURCE.openai.azure.com/openai/v1
 
@@ -130,3 +135,18 @@ integration mechanics; they are not a complete expert-labeled benchmark.
 Document ingestion stores text, SHA-256 source fingerprints and ingestion times
 in the research database. Users should consult the linked authoritative sources
 and have a qualified professional review any safety-related assessment.
+
+
+### Private evaluation runner
+
+Export the EX-01 Test Cases sheet as CSV locally. Never commit it to GitHub.
+A local executable replay preserves the independent dialogue groups and
+marks hypothetical turns as branches. The metrics are deliberately labeled
+retrieval proxies, not expert agreement on safety decisions:
+
+~~~bash
+python construction-edu-flask/evaluate_ex01.py --csv EX-01-private.csv --db ex01-eval.sqlite3 --output ex01-eval.json --ingest
+~~~
+
+Add --allow-llm only with an approved Azure model and documented budget.
+Reports omit the input dialogue text by default; keep all outputs private.
