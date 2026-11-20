@@ -23,18 +23,35 @@ try {
     throw "Found $($matches.Count) AI resources with deployment $DeploymentName, expected exactly one."
   }
   $foundry = $matches[0]
-  $endpoint = [string]$foundry.properties.endpoint
-  if (-not $endpoint) { $endpoint = az cognitiveservices account show --resource-group $ResourceGroup --name $foundry.name --query 'properties.endpoint' -o tsv }
-  if (-not $endpoint) { throw 'Foundry endpoint unavailable.' }
-  $uri = [Uri]$endpoint
-  if ($uri.Scheme -ne 'https' -or -not ($uri.Host.EndsWith('.openai.azure.com') -or $uri.Host.EndsWith('.services.ai.azure.com'))) { throw 'Unexpected Foundry endpoint. Review your Get code page.' }
-  $endpoint = $endpoint.TrimEnd('/')
-  Write-Host "Foundry resource: $($foundry.name)"
-  Write-Host "Foundry endpoint: $endpoint"
+  # AIServices can return a generic Cognitive Services URL; OpenAI v1
+  # requires its separate openai.azure.com or services.ai.azure.com host.
+  # Never store an untested endpoint in the running Container App.
+  $originalEndpoint = [string]$foundry.properties.endpoint
+  $resourceName = [string]$foundry.name
+  $customSubdomain = [string]$foundry.properties.customSubDomainName
+  if (-not $customSubdomain -and $originalEndpoint -match '^https://([^.]+)\.cognitiveservices\.azure\.com') {
+    $customSubdomain = $Matches[1]
+  }
+  if (-not $customSubdomain) { $customSubdomain = $resourceName }
+  $candidates = New-Object 'System.Collections.Generic.List[string]'
+  if ($originalEndpoint) {
+    try {
+      $originalUri = [Uri]$originalEndpoint
+      if ($originalUri.Scheme -eq 'https' -and
+          ($originalUri.Host.EndsWith('.openai.azure.com') -or $originalUri.Host.EndsWith('.services.ai.azure.com'))) {
+        $candidates.Add($originalUri.GetLeftPart([System.UriPartial]::Authority))
+      }
+    } catch {}
+  }
+  foreach ($suffix in @('openai.azure.com', 'services.ai.azure.com')) {
+    $candidates.Add(('https://' + $customSubdomain + '.' + $suffix))
+  }
+  $candidates = @($candidates | Select-Object -Unique)
+  Write-Host "Foundry resource: $resourceName"
+  if ($originalEndpoint) { Write-Host "Azure reported host: $(([Uri]$originalEndpoint).Host)" }
   Write-Host "Model deployment: $DeploymentName"
-  $foundryKey = az cognitiveservices account keys list --resource-group $ResourceGroup --name $foundry.name --query key1 -o tsv
-  if ($LASTEXITCODE -ne 0 -or -not $foundryKey) { throw 'Unable to access Foundry API key; check permissions.' }
-  Write-Host 'Testing chat JSON endpoint with one small, potentially billed request...'
+  $foundryKey = az cognitiveservices account keys list --resource-group $ResourceGroup --name $resourceName --query key1 -o tsv
+  if ($LASTEXITCODE -ne 0 -or -not $foundryKey) { throw 'Unable to read Foundry API key. Verify your Azure permissions.' }
   $ping = @{
     model = $DeploymentName
     messages = @(
@@ -44,11 +61,31 @@ try {
     response_format = @{type='json_object'}
     max_tokens = 80
   } | ConvertTo-Json -Depth 6
-  try {
-    $reply = Invoke-RestMethod -Uri "$endpoint/openai/v1/chat/completions" -Method Post -Headers @{'api-key'=$foundryKey} -ContentType 'application/json' -Body $ping -TimeoutSec 60
-  } catch {
-    throw "Foundry model test failed before changing SiteObserver: $($_.Exception.Message)"
+  $endpoint = $null
+  $reply = $null
+  foreach ($candidate in $candidates) {
+    $uri = [Uri]$candidate
+    if ($uri.Scheme -ne 'https' -or
+        -not ($uri.Host.EndsWith('.openai.azure.com') -or $uri.Host.EndsWith('.services.ai.azure.com'))) { continue }
+    Write-Host "Testing $($uri.Host) with a small potentially metered model call..."
+    try {
+      $response = Invoke-RestMethod -Uri "$candidate/openai/v1/chat/completions" -Method Post -Headers @{'api-key'=$foundryKey} -ContentType 'application/json' -Body $ping -TimeoutSec 60
+      if ($response.choices -and $response.choices[0].message.content) {
+        $endpoint = $candidate
+        $reply = $response
+        break
+      }
+      Write-Warning "No usable Chat Completions response from $($uri.Host)"
+    } catch {
+      $httpStatus = 'unknown'
+      try { $httpStatus = [int]$_.Exception.Response.StatusCode } catch {}
+      Write-Warning "$($uri.Host) did not pass v1 chat test (HTTP status $httpStatus)"
+    }
   }
+  if (-not $endpoint) {
+    throw 'No OpenAI v1 endpoint passed. Open Foundry > Models > gpt-4.1-mini > Get code and inspect the base URL. SiteObserver has not been changed.'
+  }
+  Write-Host "Verified model endpoint: $endpoint"
   if (-not $reply.choices[0].message.content) { throw 'Foundry did not return a supported chat response.' }
   Write-Host 'Direct Foundry model test passed.'
   az containerapp secret set --resource-group $ResourceGroup --name $AppName --secrets "crs-azure-openai-key=$foundryKey" -o none
