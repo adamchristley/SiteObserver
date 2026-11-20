@@ -134,3 +134,10 @@ def register_web_api(app):
         data = payload()
         return jsonify(Workbench().branch(
             sid, data.get("name"), data.get("from_branch", "base"))), 201
+    @app.post("/api/workbench/scenarios/<sid>/review")
+    @authenticated
+    def wb_review(sid):
+        data = payload()
+        return jsonify(Workbench().review(sid, data.get("branch", "base"),
+                                            data.get("decision_id"),
+                                            data.get("action"), data.get("note", "")))
