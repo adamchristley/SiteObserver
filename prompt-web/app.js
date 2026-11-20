@@ -163,7 +163,15 @@ function renderEvidence(list) {
       link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
       heading.append(link);
     }
-    article.append(heading, D('p', '', (item.text || item.summary || '').slice(0, 900)));
+    article.append(heading);
+    if (item.edition) {
+      article.append(D('small', 'source-edition',
+        'Historical ' + item.edition + ' · supplied CFR PDF · page ' + item.pdf_page +
+        ' · charts/figures may require original PDF'));
+    } else {
+      article.append(D('small', 'source-edition', 'Official source-text retrieval snapshot'));
+    }
+    article.append(D('p', '', (item.text || item.summary || '').slice(0, 900)));
     root.append(article);
   }
 }
@@ -230,7 +238,10 @@ $('#message-form').addEventListener('submit', async (event) => {
       renderScenario(result.scenario);
       await refreshDetails();
     }
-    renderEvidence(result.cited_osha);
+    renderEvidence(result.retrieved_osha || result.cited_osha);
+    if (result.citation_attribution === 'retrieval_only') {
+      $('#conversation-state').textContent = 'Retrieved sources shown; model citations require verification';
+    }
     if (result.warnings?.length) $('#conversation-state').textContent = result.warnings[0];
     $('#message').value = '';
     $('#message-count').textContent = '0 / 2000';

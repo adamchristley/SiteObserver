@@ -27,6 +27,7 @@ SOURCES = {
     **{f"1926 Subpart P App {letter}": BASE + f"1926SubpartPApp{letter}" for letter in "ABCDEF"},
 }
 DEFAULT_PATH = Path(__file__).with_name("data") / "osha_corpus.json"
+REFERENCE_2025_DIR = DEFAULT_PATH.parent / "reference_2025"
 CITE_RE = re.compile(r"^(1926\.(?:650|651|652)(?:\([a-z0-9]+\)){1,8})(?:\s+(.+))?$", re.I)
 TOKEN = re.compile(r"[a-z0-9]+", re.I)
 STOP = set("the a an and or of to is in on as are for by with from that what how when does this those they have was which about need should into within would will at be".split())
@@ -151,6 +152,16 @@ class OSHAIndex:
         if self.path.is_file():
             self.snapshot = json.loads(self.path.read_text(encoding="utf-8"))
         self.docs = self.snapshot.get("chunks", []) if self.snapshot else []
+        self.reference = []
+        # The supplied July 2025 CFR is a separate, auditable research baseline.
+        # Loading it does not overwrite the newer primary OSHA/eCFR snapshot.
+        if path is None and "CRS_OSHA_CORPUS_PATH" not in os.environ:
+            for filename in sorted(REFERENCE_2025_DIR.glob("*.json")):
+                snapshot = json.loads(filename.read_text(encoding="utf-8"))
+                if snapshot.get("edition") != "2025-07-01":
+                    raise ValueError(f"Unexpected historical reference edition: {filename}")
+                self.reference.extend(snapshot.get("chunks", []))
+        self.docs = self.docs + self.reference
         self.tf = [Counter(_tokens(d["citation"] + " " + d["text"])) for d in self.docs]
         self.df = Counter()
         for freq in self.tf:
@@ -160,7 +171,10 @@ class OSHAIndex:
     def status(self):
         return {"ready": bool(self.docs), "mode": "osha_source_text" if self.docs else "catalog_only",
                 "chunks": len(self.docs), "source_pages": len(self.snapshot["source_pages"]) if self.snapshot else 0,
-                "retrieved_at": self.snapshot.get("retrieved_at") if self.snapshot else None}
+                "reference_2025_chunks": len(self.reference),
+                "reference_2025_edition": "2025-07-01" if self.reference else None,
+                "retrieved_at": self.snapshot.get("retrieved_at") if self.snapshot else None,
+                "historical_reference_only": bool(self.reference) and not bool(self.snapshot)}
 
     def search(self, query, limit=7):
         if not isinstance(query, str) or not query.strip() or len(query) > 4000:
@@ -191,11 +205,13 @@ class OSHAIndex:
                     score += 8
             if score > 0:
                 ranked.append((score, doc))
-        ranked.sort(key=lambda pair: -pair[0])
+        # Prefer the current snapshot on equal lexical relevance. The 2025 PDF
+        # remains accessible as versioned evidence, not the default legal authority.
+        ranked.sort(key=lambda pair: (-pair[0], bool(pair[1].get("edition"))))
         chunks = [{**doc, "score": round(score, 4)} for score, doc in ranked[:limit]]
         return {"mode": "osha_source_text", "chunks": chunks,
-                "retrieved_at": self.snapshot["retrieved_at"],
-                "warning": "Source snapshot may be outdated. Expert verification is required."}
+                "retrieved_at": self.snapshot.get("retrieved_at") if self.snapshot else None,
+                "warning": "Sources include a current retrieval snapshot and historical 2025 text; check edition and expert applicability."}
 
 
 def ingest_from_govinfo(output=DEFAULT_PATH, download=None):

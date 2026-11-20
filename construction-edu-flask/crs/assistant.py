@@ -104,12 +104,24 @@ def _safe_conditions(raw):
     return result, rejected
 
 
+def _canonical_citation(value):
+    """Normalize presentation differences, never invent regulatory subsections."""
+    if not isinstance(value, str):
+        return None
+    value = re.sub(r"^(?:29\s*CFR\s*|§\s*)+", "", value.strip(), flags=re.I)
+    value = re.sub(r"\s+", "", value).rstrip(".,;")
+    return value or None
+
+
 def _grounded_citations(raw, retrieved):
     sources = retrieved.get("chunks", []) or retrieved.get("catalog_matches", [])
-    allowed = {r["citation"] if "citation" in r else r["id"] for r in sources}
+    allowed = {_canonical_citation(r.get("citation", r.get("id"))): r.get("citation", r.get("id"))
+               for r in sources}
     if not isinstance(raw, list):
         return []
-    return list(dict.fromkeys(x for x in raw if isinstance(x, str) and x in allowed))[:10]
+    # Accept formatting differences only. Do not accept an invented citation.
+    return list(dict.fromkeys(allowed[c] for value in raw
+                              if (c := _canonical_citation(value)) in allowed))[:10]
 
 
 def _grounded_edges(raw, conditions, citations):
@@ -180,7 +192,7 @@ class CRSAssistant:
             "Do not invent measurements, inspections, worker locations, or protective adequacy. "
             "Conflicting testimony must be flagged and left unresolved. "
             "Hypothetical claims must not silently change the original scenario. "
-            "Only cite exact citation identifiers appearing in the supplied official-source snippets. "
+            "Copy the relevant citation identifier EXACTLY from the supplied sources into citations; never invent or paraphrase identifiers. "
             "Do not output Approved or assert field compliance certification. "
             "The model suggests dependency edges, which require human review. "
             "Return a JSON object with keys conditions (field:value), conflicts (string list), "
@@ -239,7 +251,7 @@ class CRSAssistant:
                 for key in list(conditions):
                     if any(re.search(r"\b" + re.escape(key) + r"\b", x) for x in conflicts):
                         conditions.pop(key)
-                citations = _grounded_citations(suggestion.get("citations"), retrieved)
+                model_citations = _grounded_citations(suggestion.get("citations"), retrieved)
                 raw_answer = suggestion.get("answer", "")
                 answer = str(raw_answer)[:4000] if raw_answer else "The model did not return a usable assessment."
                 status = suggestion.get("status")
@@ -269,11 +281,11 @@ class CRSAssistant:
                 warnings.append(str(exc))
                 suggestion = {}
                 conditions = {}
-                conflicts, citations, proposals, candidates = [], [], [], []
+                conflicts, model_citations, proposals, candidates = [], [], [], []
                 answer, status, model_mode = "", "Insufficient Information", "rule_based"
         else:
             conditions = {}
-            conflicts, citations, proposals, candidates = [], [], [], []
+            conflicts, model_citations, proposals, candidates = [], [], [], []
             answer, status, model_mode = "", "Insufficient Information", "rule_based"
             warnings.append("Azure OpenAI is not configured; only deterministic fact extraction and retrieval are available.")
 
@@ -290,6 +302,20 @@ class CRSAssistant:
                 answer = ("Official OSHA source text has not been ingested. "
                           "The limited curated catalog cannot support a document-grounded assessment.")
             status = "Insufficient Information"
+
+        # Always expose source passages separately from model-grounded citations.
+        # A retrieved hit is not evidence that the model attributed its answer.
+        evidence = retrieved.get("chunks", []) or retrieved.get("catalog_matches", [])
+        retrieved_citations = list(dict.fromkeys(
+            item.get("citation", item.get("id")) for item in evidence
+            if item.get("citation", item.get("id"))))[:8]
+        if model_mode == "rule_based":
+            model_citations = []
+        if model_mode == "azure_openai" and not model_citations and retrieved_citations:
+            warnings.append("Model provided no verified citations; the displayed sources are retrieval matches only.")
+        citations = model_citations or retrieved_citations
+        citation_attribution = ("model_supported" if model_citations else
+                                "retrieval_only" if retrieved_citations else "none")
 
         # If no additional facts are known, allow question-answering without mutating state.
         if previous is None:
@@ -357,9 +383,12 @@ class CRSAssistant:
 
         response = {
             "mode": model_mode, "answer": answer, "status": status,
-            "cited_osha": [r for r in (retrieved.get("chunks", []) or retrieved.get("catalog_matches", []))
-                           if (r.get("citation", r.get("id")) in citations)],
-            "citations": citations, "conditions_extracted": conditions,
+            "cited_osha": [r for r in evidence if r.get("citation", r.get("id")) in citations],
+            "retrieved_osha": evidence[:8],
+            "model_citations": model_citations,
+            "citations": citations,
+            "citation_attribution": citation_attribution,
+            "conditions_extracted": conditions,
             "conflicts": conflicts, "dependency_proposals": proposals, "candidate_decisions": candidates,
             "candidate_decisions_flagged": flagged,
             "warnings": warnings + ([retrieved["warning"]] if retrieved.get("warning") else []),

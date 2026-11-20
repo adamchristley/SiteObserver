@@ -124,7 +124,8 @@ def test_bad_model_fields_and_fake_citations_do_not_get_persisted(tmp_path):
     response = assistant.analyze("6 foot trench")
     assert response["status"] == "Requires Expert Review"
     assert "confirmed_safe" not in response["scenario"]["conditions"]
-    assert not response["citations"]
+    assert not response["model_citations"]
+    assert response["citation_attribution"] == "retrieval_only"
     assert not response["dependency_proposals"]
     assert any("Rejected" in w for w in response["warnings"])
 
@@ -156,3 +157,73 @@ def test_web_password_uses_cookie_and_csrf_not_browser_api_key(tmp_path, monkeyp
         assert got.json["version"] == 1
     finally:
         app.secret_key = old_secret
+
+
+def test_cfr_2025_pdf_reference_is_versioned_and_page_linked():
+    file = Path(__file__).parent / "crs/data/reference_2025/subpart_p_excerpt.json"
+    saved = json.loads(file.read_text(encoding="utf-8"))
+    assert saved["edition"] == "2025-07-01"
+    assert saved["original_pdf_sha256"] == (
+        "de3ec7f556ce02c7fe3089806b62773b84a3e2cf1ed9ecedc6e064da4f14a89c")
+    assert len(saved["chunks"]) >= 60
+    assert {c["citation"] for c in saved["chunks"]} >= {"1926.650", "1926.651", "1926.652"}
+    assert all(c["pdf_page"] >= 337 and c["pdf_page"] <= 373 for c in saved["chunks"])
+    assert all(c["edition"] == "2025-07-01" and c["source_type"] == "2025_pdf_reference"
+               for c in saved["chunks"])
+    assert 371 in saved["unindexed_graphics_pages"]
+
+
+def test_model_omits_citations_but_shows_retrieved_passages_separately(tmp_path):
+    index = _index(tmp_path)
+    engine = CRSEngine(tmp_path / "citation.sqlite3")
+    def without_cites(_):
+        return {"conditions": {"depth_ft": 6, "is_trench": True},
+                "answer": "Protection needs evaluation.",
+                "status": "Requires Expert Review", "citations": []}
+    response = CRSAssistant(engine, index=index, infer=without_cites).analyze(
+        "Workers are inside a 6 foot trench without a protective system")
+    assert response["mode"] == "azure_openai"
+    assert response["retrieval_mode"] == "osha_source_text"
+    assert response["citation_attribution"] == "retrieval_only"
+    assert response["model_citations"] == []
+    assert response["citations"]
+    assert response["retrieved_osha"]
+    assert response["cited_osha"]
+    assert any("no verified citations" in warning for warning in response["warnings"])
+
+
+def test_model_normalized_citation_and_unknown_citation_rejected(tmp_path):
+    index = _index(tmp_path)
+    engine = CRSEngine(tmp_path / "citation2.sqlite3")
+    def cites(_):
+        return {"conditions": {"depth_ft": 6},
+                "answer": "Review required.", "status": "Pending Verification",
+                "citations": ["29 CFR § 1926.652(a)(1)", "29 CFR 1926.999(z)"]}
+    result = CRSAssistant(engine, index=index, infer=cites).analyze(
+        "Trench cave-in protective system depth six feet")
+    assert result["citation_attribution"] == "model_supported"
+    assert result["model_citations"] == ["1926.652(a)(1)"]
+    assert "1926.999(z)" not in result["citations"]
+
+
+def test_conflicted_model_depth_does_not_overwrite_factual_base(tmp_path):
+    index = _index(tmp_path)
+    engine = CRSEngine(tmp_path / "conflict.sqlite3")
+    def fake(messages):
+        text = json.loads(messages[-1]["content"])["new_message"]
+        if "second report" in text.lower():
+            return {"conditions": {"depth_ft": 4},
+                    "conflicts": ["depth_ft conflicting witness reports"],
+                    "answer": "Measurements conflict.", "status": "Pending Verification",
+                    "citations": []}
+        return {"conditions": {"depth_ft": 6}, "conflicts": [],
+                "answer": "Depth reported at six feet.", "status": "Insufficient Information",
+                "citations": []}
+    assistant = CRSAssistant(engine, index=index, infer=fake)
+    initial = assistant.analyze("First report: six feet of excavation depth")
+    sid = initial["scenario"]["scenario_id"]
+    changed = assistant.analyze(
+        "Second report: depth was four feet", scenario_id=sid, expected_version=1)
+    assert changed["scenario"]["version"] == 1
+    assert changed["scenario"]["conditions"]["depth_ft"] == 6
+    assert changed["conflicts"]
