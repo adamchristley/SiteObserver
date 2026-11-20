@@ -186,3 +186,19 @@ def test_private_ex01_replay_reports_without_raw_dialogue(wb):
     assert out["turns"][1]["version"] == 2
     assert out["turns"][2]["version"] == 1
     assert all("User Input" not in str(record) for record in out["turns"])
+
+
+def test_postgres_workbench_end_to_end_when_ci_db_available(monkeypatch):
+    import os
+    url = os.environ.get("CRS_TEST_POSTGRES_URL")
+    if not url:
+        pytest.skip("Disposable PostgreSQL CI database is not available")
+    monkeypatch.setenv("CRS_DATABASE_URL", url)
+    monkeypatch.delenv("CRS_LLM_API_KEY", raising=False)
+    wb = Workbench(CRSEngine())
+    initial = wb.create("Workers are inside a 6-foot trench.")
+    sid = initial["scenario_id"]
+    changed = wb.revise(sid, "The trench is now 4 feet deep.", 1)
+    assert changed["version"] == 2
+    assert changed["core_version"] == 2
+    assert Workbench(CRSEngine()).view(sid)["conditions"]["depth_ft"] == 4
