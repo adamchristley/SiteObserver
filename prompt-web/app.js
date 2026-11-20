@@ -188,6 +188,13 @@ async function refreshDetails() {
     for (const edge of suggested) {
       graphRoot.append(D('div', 'graph-edge proposed', 'PROPOSED · ' + edge.decision_id + ' ← ' + edge.condition_key + ' (' + edge.review_status + ')'));
     }
+    for (const candidate of (graph.candidate_decisions || [])) {
+      const card = D('div', 'graph-edge proposed',
+        'CANDIDATE · ' + candidate.decision_id + ': ' + candidate.status +
+        ' · evaluated ' + candidate.evaluation_count + ' time(s) · ' + candidate.review_status);
+      card.append(D('div', '', candidate.rationale));
+      graphRoot.append(card);
+    }
     const hist = $('#history');
     hist.replaceChildren();
     for (const event of (history.state_events || []).slice().reverse()) {
