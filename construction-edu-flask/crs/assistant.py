@@ -211,7 +211,20 @@ class CRSAssistant:
         if hypothetical and branch == "base" and previous is not None:
             raise CRSInputError("Create a named hypothetical branch before applying this change")
 
+        # Revisit existing source citations whenever the stored scenario is updated.
+        # Otherwise a short correction such as "now four feet" can omit OSHA
+        # evidence needed to reassess a previously grounded candidate decision.
+        prior_citations = []
+        if previous:
+            with self.engine._db() as db:
+                rows = db.execute(
+                    "SELECT DISTINCT citation FROM crs_dynamic_edges "
+                    "WHERE scenario_id=? AND branch=?",
+                    (scenario_id, branch)).fetchall()
+            prior_citations = [row["citation"] for row in rows]
         query = text + (" " + json.dumps(previous["conditions"]) if previous else "")
+        if prior_citations:
+            query += " " + " ".join(prior_citations[:20])
         retrieved = self.index.search(query[:4000])
         warnings = []
         if self.infer:
