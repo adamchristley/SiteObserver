@@ -147,6 +147,7 @@ class Workbench:
         parsed = self._extract(text)
         if not parsed["conditions"]:
             raise CRSInputError("At least one recognized excavation fact is needed to start a case")
+        parsed["extra_facts"] = {k:v for k,v in parsed["extra_facts"].items() if v is not None}
         core = self.engine.create(parsed["conditions"])
         sid = core["scenario_id"]
         now = stamp()
@@ -175,7 +176,11 @@ class Workbench:
         extra = dict(before["extra_facts"])
         changes = set()
         for key, val in parsed["extra_facts"].items():
-            if extra.get(key) != val:
+            if val is None:
+                if key in extra:
+                    del extra[key]
+                    changes.add(key)
+            elif key not in extra or extra[key] != val:
                 extra[key] = val
                 changes.add(key)
         if patch:
