@@ -75,8 +75,8 @@ def extract(message, current_conditions=None, current_extra=None):
         "You extract only explicit, user-asserted excavation facts and corrections. "
         "Do not infer missing facts. Return JSON: "
         '{"conditions":{"depth_ft":6,"is_trench":true},'
-        ''"extra_facts":{"shield_count":2},"uncertainties":["..."],'
-        '"attributions":{"shield_count":"witness report"}}. ''
+        '"extra_facts":{"shield_count":2},"uncertainties":["..."],'
+        '"attributions":{"shield_count":"witness report"}}. '
         "Known keys: " + ", ".join(sorted(ALL_FIELDS)) + ". "
         "Use only valid booleans/numbers/enumerations for known keys; use null "
         "to mark explicitly retracted statements unknown; use null in extra_facts "
