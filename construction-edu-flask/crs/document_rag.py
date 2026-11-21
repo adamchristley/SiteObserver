@@ -6,6 +6,7 @@ download remote material. The source text is a timestamped research snapshot.
 from __future__ import annotations
 
 from collections import Counter
+from functools import lru_cache
 from datetime import datetime, timezone
 from hashlib import sha256
 from html import unescape
@@ -225,6 +226,13 @@ class OSHAIndex:
                 "scope": self.snapshot.get("scope") if self.snapshot else None,
                 "filtered_subpart": subpart,
                 "warning": "Source snapshots require edition and expert applicability checks. Historical 2025 excerpts are separately labeled."}
+
+
+
+@lru_cache(maxsize=1)
+def get_index():
+    """Build the immutable, shipped corpus once per Gunicorn worker."""
+    return OSHAIndex()
 
 
 def ingest_from_govinfo(output=DEFAULT_PATH, download=None):
