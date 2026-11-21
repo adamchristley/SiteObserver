@@ -6,6 +6,7 @@ download remote material. The source text is a timestamped research snapshot.
 from __future__ import annotations
 
 from collections import Counter
+from functools import lru_cache
 from datetime import datetime, timezone
 from hashlib import sha256
 from html import unescape
@@ -162,7 +163,7 @@ class OSHAIndex:
                     raise ValueError(f"Unexpected historical reference edition: {filename}")
                 self.reference.extend(snapshot.get("chunks", []))
         self.docs = self.docs + self.reference
-        self.tf = [Counter(_tokens(d["citation"] + " " + d["text"])) for d in self.docs]
+        self.tf = [Counter(_tokens(" ".join(str(d.get(k) or "") for k in ("citation", "title", "subpart_title", "text")))) for d in self.docs]
         self.df = Counter()
         for freq in self.tf:
             self.df.update(freq.keys())
@@ -174,13 +175,20 @@ class OSHAIndex:
                 "reference_2025_chunks": len(self.reference),
                 "reference_2025_edition": "2025-07-01" if self.reference else None,
                 "retrieved_at": self.snapshot.get("retrieved_at") if self.snapshot else None,
-                "historical_reference_only": bool(self.reference) and not bool(self.snapshot)}
+                "historical_reference_only": bool(self.reference) and not bool(self.snapshot),
+                "scope": self.snapshot.get("scope", "excavation_subpart_p") if self.snapshot else "unavailable",
+                "section_count": self.snapshot.get("section_count") if self.snapshot else None,
+                "appendix_count": self.snapshot.get("appendix_count") if self.snapshot else None,
+                "subparts": self.snapshot.get("subparts", []) if self.snapshot else []}
 
-    def search(self, query, limit=7):
+    def search(self, query, limit=7, subpart=None):
         if not isinstance(query, str) or not query.strip() or len(query) > 4000:
             raise ValueError("A query of 1 to 4,000 characters is required")
         if type(limit) is not int or not 1 <= limit <= 12:
             raise ValueError("limit must be between 1 and 12")
+        if subpart is not None and (not isinstance(subpart, str) or not re.fullmatch(r"[A-Za-z]{1,2}", subpart)):
+            raise ValueError("subpart must be a one- or two-letter identifier")
+        subpart = subpart.upper() if subpart else None
         if not self.docs:
             # Explicit fallback only. Never describe the old catalog as downloaded OSHA text.
             from .osha_retriever import retrieve_osha
@@ -192,6 +200,8 @@ class OSHAIndex:
         n, average = len(self.docs), max(self.avgdl, 1)
         ranked = []
         for doc, freq in zip(self.docs, self.tf):
+            if subpart and doc.get("subpart") != subpart:
+                continue
             length = max(sum(freq.values()), 1)
             score = 0.0
             for term in set(terms):
@@ -200,10 +210,12 @@ class OSHAIndex:
                     idf = log(1 + (n - self.df[term] + .5) / (self.df[term] + .5))
                     score += idf * (count * 2.5 / (count + 1.5 * (.25 + .75 * length / average)))
             # Citation exact matches are much stronger than generic words.
-            for cited in re.findall(r"1926\.(?:650|651|652)(?:\([a-z0-9]+\))*", query, re.I):
+            for cited in re.findall(r"1926\.\d{1,4}[a-z]?(?:\([a-z0-9]+\))*", query, re.I):
                 if doc["citation"].startswith(cited):
                     score += 8
             if score > 0:
+                if doc.get("subpart") and re.search(r"\bsubpart\s+" + re.escape(doc["subpart"]) + r"\b", query, re.I):
+                    score += 3
                 ranked.append((score, doc))
         # Prefer the current snapshot on equal lexical relevance. The 2025 PDF
         # remains accessible as versioned evidence, not the default legal authority.
@@ -211,7 +223,16 @@ class OSHAIndex:
         chunks = [{**doc, "score": round(score, 4)} for score, doc in ranked[:limit]]
         return {"mode": "osha_source_text", "chunks": chunks,
                 "retrieved_at": self.snapshot.get("retrieved_at") if self.snapshot else None,
-                "warning": "Sources include a current retrieval snapshot and historical 2025 text; check edition and expert applicability."}
+                "scope": self.snapshot.get("scope") if self.snapshot else None,
+                "filtered_subpart": subpart,
+                "warning": "Source snapshots require edition and expert applicability checks. Historical 2025 excerpts are separately labeled."}
+
+
+
+@lru_cache(maxsize=1)
+def get_index():
+    """Build the immutable, shipped corpus once per Gunicorn worker."""
+    return OSHAIndex()
 
 
 def ingest_from_govinfo(output=DEFAULT_PATH, download=None):

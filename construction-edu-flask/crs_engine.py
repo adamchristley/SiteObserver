@@ -1,12 +1,13 @@
 """CRS-RAG research prototype: versioned scoped states and explicit decision dependencies.
 
-This is NOT a field-ready OSHA compliance service. Rule coverage is intentionally limited.
+This is NOT a field-ready OSHA compliance service. Predefined excavation rules are intentionally scoped; other construction decisions require review.
 No LLM calls: the state and selective reassessment core are deterministic/testable.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -96,6 +97,15 @@ ENUM_FIELDS['soil_type'] = {'A', 'B', 'C', 'unknown'}
 
 ALL_FIELDS = BOOL_FIELDS | NUMBER_FIELDS | set(ENUM_FIELDS)
 
+# Research observations from OTHER construction subparts. These are unverified
+# site reports, NOT newly certified safety rules. Names are namespaced to avoid
+# accidentally overriding excavation-specific deterministic facts.
+OBSERVATION_KEY_RE = re.compile(r'\Aobs_[a-z][a-z0-9_]{1,57}\Z')
+
+
+def allowed_fact_key(key):
+    return isinstance(key, str) and (key in ALL_FIELDS or bool(OBSERVATION_KEY_RE.fullmatch(key)))
+
 
 class CRSInputError(ValueError):
     pass
@@ -112,7 +122,7 @@ class CRSVersionConflict(Exception):
 def validate_changes(changes):
     if not isinstance(changes, dict) or not changes:
         raise CRSInputError('conditions must be a nonempty JSON object')
-    unknown = set(changes) - ALL_FIELDS
+    unknown = {key for key in changes if not allowed_fact_key(key)}
     if unknown:
         raise CRSInputError('Unsupported conditions: ' + ', '.join(sorted(unknown)))
     result = {}
@@ -132,6 +142,18 @@ def validate_changes(changes):
             if not isinstance(val, str) or val not in ENUM_FIELDS[key]:
                 raise CRSInputError(key + ' must be one of: ' + ', '.join(sorted(ENUM_FIELDS[key])))
             result[key] = val
+        elif OBSERVATION_KEY_RE.fullmatch(key):
+            # Small, strongly typed scalars only. No nested LLM JSON, no code,
+            # no raw documents, no large personally identifying reports.
+            if isinstance(val, bool):
+                result[key] = val
+            elif isinstance(val, (float, int)) and not isinstance(val, bool) and 0 <= val <= 100000:
+                result[key] = float(val)
+            elif isinstance(val, str) and 0 < len(val) <= 240:
+                result[key] = val
+            else:
+                raise CRSInputError(key + ' must be a boolean, number, or 1-240 character text')
+
     return result
 
 
