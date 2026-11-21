@@ -100,7 +100,11 @@ ALL_FIELDS = BOOL_FIELDS | NUMBER_FIELDS | set(ENUM_FIELDS)
 # Research observations from OTHER construction subparts. These are unverified
 # site reports, NOT newly certified safety rules. Names are namespaced to avoid
 # accidentally overriding excavation-specific deterministic facts.
-OBSERVATION_KEY_RE = re.compile(r'^obs_[a-z][a-z0-9_]{1,57}
+OBSERVATION_KEY_RE = re.compile(r'\Aobs_[a-z][a-z0-9_]{1,57}\Z')
+
+
+def allowed_fact_key(key):
+    return isinstance(key, str) and (key in ALL_FIELDS or bool(OBSERVATION_KEY_RE.fullmatch(key)))
 
 
 class CRSInputError(ValueError):
