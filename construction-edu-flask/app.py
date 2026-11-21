@@ -306,7 +306,8 @@ def update_conditions(engine, sid):
 @crs_protected
 def new_branch(engine, sid):
     payload = json_payload()
-    return jsonify(engine.branch(sid, payload.get('name'), payload.get('from_branch', 'base'))), 201
+    return jsonify(CRSAssistant(engine, index=get_index()).fork(
+        sid, payload.get('name'), payload.get('from_branch', 'base'))), 201
 
 
 @app.get('/api/crs/scenarios/<sid>/history')
