@@ -65,9 +65,20 @@ async function loadStatus() {
     const s = await api('/api/crs/assistant/status');
     $('#corpus-state').textContent = s.corpus.ready ? 'READY' : 'NOT INDEXED';
     $('#model-state').textContent = s.model_configured ? 'AZURE LLM' : 'RULE BASED';
+    const full = s.corpus.scope === 'full_part_1926';
+    $('#corpus-state').textContent = s.corpus.ready ? (full ? 'FULL PART 1926' : 'PARTIAL SOURCE') : 'NOT INDEXED';
     $('#corpus-detail').textContent = s.corpus.ready ?
-      s.corpus.source_pages + ' official source pages, ' + s.corpus.chunks + ' indexed passages. Snapshot: ' + (s.corpus.retrieved_at || 'unknown') :
-      'Official source-text archive is not installed. Only the small curated reference catalog is available.';
+      (s.corpus.section_count || 'Unknown') + ' regulatory sections, ' +
+      (s.corpus.subparts?.length || 'unknown') + ' subparts, and ' + s.corpus.chunks +
+      ' indexed passages. Historical 2025 excerpts: ' + (s.corpus.reference_2025_chunks || 0) +
+      '. Snapshot: ' + (s.corpus.retrieved_at || 'unknown') :
+      'Official Part 1926 source-text archive is not installed. Regulatory coverage is incomplete.';
+    const select = $('#subpart-filter');
+    select.replaceChildren(new Option('All Part 1926 subparts', ''));
+    for (const entry of (s.corpus.subparts || [])) {
+      const description = String(entry.title || '').replace(/^Subpart\s+[A-Z]{1,2}\s*[—-]?\s*/i, '');
+      select.add(new Option('Subpart ' + entry.code + ' · ' + description.slice(0, 42), entry.code));
+    }
   } catch (err) { alertError(err.message); }
 }
 function clearScenario() {
@@ -145,8 +156,8 @@ function renderScenario(view) {
     $('#conversation-state').textContent = 'Version ' + view.version + ' saved';
   }
 }
-function renderEvidence(list) {
-  const root = $('#evidence');
+function renderEvidence(list, rootSelector = '#evidence') {
+  const root = $(rootSelector);
   root.replaceChildren();
   if (!list?.length) return root.append(D('p', 'muted', 'No directly retrieved source passages for this request.'));
   for (const item of list) {
@@ -156,7 +167,7 @@ function renderEvidence(list) {
     let url = null;
     try {
       url = new URL(item.source_url);
-      if (url.protocol !== 'https:' || url.hostname !== 'www.osha.gov') url = null;
+      if (url.protocol !== 'https:' || !['www.osha.gov', 'www.govinfo.gov', 'www.ecfr.gov'].includes(url.hostname)) url = null;
     } catch { url = null; }
     if (url) {
       const link = D('a', '', 'View official text ↗');
@@ -164,6 +175,9 @@ function renderEvidence(list) {
       heading.append(link);
     }
     article.append(heading);
+    if (item.subpart) {
+      article.append(D('small', 'source-edition', 'Subpart ' + item.subpart + ' · ' + (item.title || 'Construction safety provision')));
+    }
     if (item.edition) {
       article.append(D('small', 'source-edition',
         'Historical ' + item.edition + ' · supplied CFR PDF · page ' + item.pdf_page +
@@ -207,13 +221,29 @@ async function refreshDetails() {
     hist.replaceChildren();
     for (const event of (history.state_events || []).slice().reverse()) {
       const row = D('div', 'history-entry');
-      row.append(D('strong', '', 'v' + event.version + ' · ' + event.op),
+      row.append(D('strong', '', 'v' + event.version + ' · ' + (event.operation || event.op)),
                  D('small', '', JSON.stringify(event.changes || event.changed || {}).slice(0, 250)));
       hist.append(row);
     }
     if (!hist.children.length) hist.append(D('p', 'muted', 'No state events.'));
   } catch (err) { alertError(err.message); }
 }
+$('#source-browser-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const query = $('#source-browser-q').value.trim();
+  if (!query) return;
+  const subpart = $('#subpart-filter').value;
+  const root = $('#browser-results');
+  root.replaceChildren(D('p', 'muted', 'Searching the indexed OSHA text...'));
+  try {
+    const params = new URLSearchParams({q: query, limit: '10'});
+    if (subpart) params.set('subpart', subpart);
+    const result = await api('/api/crs/assistant/search?' + params.toString());
+    renderEvidence(result.chunks || [], '#browser-results');
+  } catch (err) {
+    root.replaceChildren(D('p', 'form-error', err.message));
+  }
+});
 $('#message').addEventListener('input', () => { $('#message-count').textContent = $('#message').value.length + ' / 2000'; });
 $('#message-form').addEventListener('submit', async (event) => {
   event.preventDefault();
