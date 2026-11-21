@@ -13,7 +13,7 @@ import secrets
 from flask import Flask, jsonify, request, send_from_directory, session
 from crs.pipeline import create_from_text, revise_from_text
 from crs.assistant import CRSAssistant, model_available
-from crs.document_rag import OSHAIndex
+from crs.document_rag import OSHAIndex, get_index
 from crs.osha_retriever import retrieve_osha, catalogue_versions
 from crs_engine import (CRSEngine, CRSInputError, CRSNotFound, CRSVersionConflict,
                         RULES, validate_changes)
@@ -161,15 +161,32 @@ def web_logout():
 @crs_protected
 def assistant_status(engine):
     del engine
-    return jsonify({'corpus': OSHAIndex().status(), 'model_configured': model_available(),
+    return jsonify({'corpus': get_index().status(), 'model_configured': model_available(),
                     'human_review_required': True})
+
+
+@app.get('/api/crs/assistant/search')
+@crs_protected
+def assistant_search(engine):
+    """Research-only, subpart-filterable search across all indexed Part 1926."""
+    del engine
+    try:
+        raw_limit = request.args.get('limit', '8')
+        limit = int(raw_limit)
+        result = get_index().search(
+            request.args.get('q', ''),
+            limit=limit,
+            subpart=request.args.get('subpart') or None)
+    except (ValueError, TypeError) as exc:
+        raise CRSInputError(str(exc)) from exc
+    return jsonify(result)
 
 
 @app.post('/api/crs/assistant')
 @crs_protected
 def assistant_message(engine):
     payload = json_payload()
-    response = CRSAssistant(engine).analyze(
+    response = CRSAssistant(engine, index=get_index()).analyze(
         payload.get('text'), payload.get('scenario_id'),
         payload.get('branch', 'base'), payload.get('expected_version'))
     return jsonify(response), (201 if response.get('scenario') and not payload.get('scenario_id') else 200)
@@ -178,13 +195,13 @@ def assistant_message(engine):
 @app.get('/api/crs/assistant/<sid>/history')
 @crs_protected
 def assistant_history(engine, sid):
-    return jsonify(CRSAssistant(engine).history(sid, request.args.get('branch', 'base')))
+    return jsonify(CRSAssistant(engine, index=get_index()).history(sid, request.args.get('branch', 'base')))
 
 
 @app.get('/api/crs/assistant/<sid>/graph')
 @crs_protected
 def assistant_graph(engine, sid):
-    return jsonify(CRSAssistant(engine).graph(sid, request.args.get('branch', 'base')))
+    return jsonify(CRSAssistant(engine, index=get_index()).graph(sid, request.args.get('branch', 'base')))
 
 
 @app.get('/api/crs/regulations')
