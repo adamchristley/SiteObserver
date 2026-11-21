@@ -48,9 +48,8 @@ def make_bulk_xml():
             for k in range(3):
                 parts.append(f'<P>({chr(97+k)}) {text}; employer duties, training and field verification for workers.</P>')
             parts.append('</DIV>')
-        if True:
-            parts.append(f'<DIV TYPE="APPENDIX" N="A"><HEAD>Appendix A to Subpart {code} of Part 1926</HEAD>'
-                         '<P>Scaffold platforms shall be reviewed using official design charts.</P></DIV>')
+        parts.append(f'<DIV TYPE="APPENDIX" N="A"><HEAD>Appendix A to Subpart {code} of Part 1926</HEAD>'
+                     '<P>Tables, procedures and engineering figures require source review.</P></DIV>')
         parts.append('</DIV>')
     parts.append('</DIV></ROOT>')
     return ('<ROOT>' + ''.join(parts)).replace("<ROOT><ROOT>","<ROOT>").encode()
@@ -148,6 +147,18 @@ def test_generic_scaffold_observation_dependencies_are_versioned(tmp_path):
     assert second["scenario"]["conditions"]["obs_fall_height_ft"] == 18
     assert "fall_protection_review" in second["candidate_decisions_flagged"]
     assert assistant.graph(sid)["candidate_decisions"][0]["evaluation_count"] == 2
+    hypothetical = assistant.fork(sid, "what_if")
+    assert hypothetical["version"] == 1
+    fork_graph = assistant.graph(sid, "what_if")
+    assert fork_graph["proposed_edges"]
+    assert fork_graph["proposed_edges"][0]["review_status"] == "needs_review"
+    forked = assistant.analyze("Suppose the platform is 12-foot high again.",
+                               scenario_id=sid, branch="what_if", expected_version=1)
+    assert forked["scenario"]["conditions"]["obs_fall_height_ft"] == 12
+    assert forked["scenario"]["version"] == 2
+    assert engine.get(sid, "base")["conditions"]["obs_fall_height_ft"] == 18
+    assert "fall_protection_review" in forked["candidate_decisions_flagged"]
+
 
 
 def test_authenticated_full_part_search_api(tmp_path, monkeypatch):
