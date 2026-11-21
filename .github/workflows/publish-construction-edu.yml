@@ -44,7 +44,7 @@ jobs:
         run: |
           python -m pip install Flask==3.1.1 pytest 'psycopg[binary]>=3.2,<4' beautifulsoup4==4.13.4
           python -m py_compile azure/run_ex01_live.py construction-edu-flask/evaluate_dialogues.py
-          python -m pytest -q construction-edu-flask/test_app.py construction-edu-flask/test_crs.py construction-edu-flask/test_postgres.py construction-edu-flask/test_nl_pipeline.py construction-edu-flask/test_osha_retrieval.py construction-edu-flask/test_layer5_hazards.py construction-edu-flask/test_crs_platform.py
+          python -m pytest -q construction-edu-flask/test_app.py construction-edu-flask/test_crs.py construction-edu-flask/test_postgres.py construction-edu-flask/test_nl_pipeline.py construction-edu-flask/test_osha_retrieval.py construction-edu-flask/test_layer5_hazards.py construction-edu-flask/test_crs_platform.py construction-edu-flask/test_part1926.py
   docker-smoke:
     needs: test
     if: github.event_name == 'pull_request'
