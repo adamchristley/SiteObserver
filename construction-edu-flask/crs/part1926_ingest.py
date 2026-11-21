@@ -84,6 +84,7 @@ def _source_rows(node):
 def _flatten_chunks(node, *, citation, section, subpart, subpart_title, title, source_url):
     passages = []
     index = 0
+    has_graphics = any(tag.tag.split("}")[-1].upper() in {"GPH", "GRAPHIC"} for tag in node.iter())
     for row in _source_rows(node):
         if len(row) < 12:
             continue
@@ -106,8 +107,7 @@ def _flatten_chunks(node, *, citation, section, subpart, subpart_title, title, s
                 "source_archive": GOVINFO_XML,
                 "edition": None,
                 "source_type": "official_ecfr_part1926",
-                "has_graphics": any(tag.tag.split("}")[-1].upper() in {"GPH", "GRAPHIC"}
-                                    for tag in node.iter()),
+                "has_graphics": has_graphics,
             })
             index += 1
     # A section can contain plain prose without P markup in some exports.
