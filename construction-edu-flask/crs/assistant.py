@@ -13,7 +13,7 @@ import json
 import os
 import re
 
-from crs_engine import ALL_FIELDS, RULES, CRSInputError, validate_changes
+from crs_engine import ALL_FIELDS, RULES, CRSInputError, validate_changes, allowed_fact_key
 from .document_rag import OSHAIndex
 from .extractor import extract_conditions
 
@@ -124,6 +124,43 @@ def _grounded_citations(raw, retrieved):
                               if (c := _canonical_citation(value)) in allowed))[:10]
 
 
+
+def _safe_observations(raw):
+    """Convert broad construction reports to unverified, namespaced facts."""
+    result, rejected = {}, []
+    if raw is None:
+        return result, rejected
+    if not isinstance(raw, dict):
+        return result, ["observations must be a JSON object"]
+    for key, value in list(raw.items())[:35]:
+        if not isinstance(key, str):
+            rejected.append(str(key)[:60])
+            continue
+        name = re.sub(r"[^a-z0-9_]+", "_", key.lower()).strip("_")
+        if not name:
+            rejected.append(key[:60])
+            continue
+        name = name if name.startswith("obs_") else "obs_" + name
+        if not allowed_fact_key(name):
+            rejected.append(key[:60])
+            continue
+        try:
+            result.update(validate_changes({name: value}))
+        except CRSInputError:
+            rejected.append(key[:60])
+    return result, rejected
+
+
+def _resolve_condition_key(field, conditions):
+    if not isinstance(field, str):
+        return None
+    if field in conditions and allowed_fact_key(field):
+        return field
+    normalized = "obs_" + re.sub(r"[^a-z0-9_]+", "_", field.lower()).strip("_")
+    if normalized in conditions and allowed_fact_key(normalized):
+        return normalized
+    return None
+
 def _grounded_edges(raw, conditions, citations):
     valid = []
     if not isinstance(raw, list):
@@ -132,10 +169,10 @@ def _grounded_edges(raw, conditions, citations):
         if not isinstance(item, dict):
             continue
         name = item.get("decision_id")
-        field = item.get("condition_key")
+        field = _resolve_condition_key(item.get("condition_key"), conditions)
         cite = item.get("citation")
         if (isinstance(name, str) and IDENTIFIER.fullmatch(name)
-                and field in conditions and field in ALL_FIELDS and cite in citations
+                and field is not None and cite in citations
                 and name != "assessed_rules_summary"):
             valid.append({"decision_id": name, "condition_key": field, "citation": cite,
                           "source": "llm", "review_status": "proposed"})
@@ -159,7 +196,8 @@ def _grounded_decisions(raw, present_conditions, citations):
                 {"undetermined", "noncompliant", "requires_review"}
                 or not isinstance(dependencies, list) or not isinstance(evidence, list)):
             continue
-        fields = [key for key in dependencies if key in present_conditions and key in ALL_FIELDS]
+        fields = [_resolve_condition_key(key, present_conditions) for key in dependencies]
+        fields = [key for key in fields if key]
         trusted = [citation for citation in evidence if citation in citations]
         if not fields or not trusted:
             continue
@@ -181,6 +219,8 @@ class CRSAssistant:
         evidence = retrieval.get("chunks", []) or retrieval.get("catalog_matches", [])
         sources = [
             {"citation": item.get("citation", item.get("id")),
+             "subpart": item.get("subpart"),
+             "title": item.get("title"),
              "source_url": item.get("source_url"),
              "text": item.get("text", item.get("summary", ""))[:1150]}
             for item in evidence[:8]
@@ -195,13 +235,19 @@ class CRSAssistant:
             "Copy the relevant citation identifier EXACTLY from the supplied sources into citations; never invent or paraphrase identifiers. "
             "Do not output Approved or assert field compliance certification. "
             "The model suggests dependency edges, which require human review. "
-            "Return a JSON object with keys conditions (field:value), conflicts (string list), "
+            "Return a JSON object with keys conditions (predefined excavation facts only), " 
+            "observations (other explicitly reported construction facts, using descriptive snake_case keys), " 
+            "conflicts (string list), "
             "answer (cautious concise analysis), status (one of Insufficient Information, "
             "Pending Verification, Not Approved, Requires Expert Review), citations "
             "(exact citation strings from sources), dependencies "
             "(list of objects containing decision_id, condition_key, citation), and decisions (list of objects with decision_id, status, rationale, citations, condition_keys). Decision statuses must be undetermined, noncompliant, or requires_review. Never use compliant as an LLM decision status. "
             "If a fact is unknown, omit it from conditions. "
-            "Use the following permitted condition keys: " + ", ".join(sorted(ALL_FIELDS))
+            "Use only the following predefined conditions: " + ", ".join(sorted(ALL_FIELDS)) + ". " 
+            "For scaffolds, fall protection, electrical, cranes, ladders, silica, confined spaces, and " 
+            "other topics, place the explicitly given facts under observations and use only retrieved " 
+            "Part 1926 sections as evidence. Never describe existing excavation-only rule results as " 
+            "an assessment of another construction subpart."
         )
         user = json.dumps({"current_state": previous.get("conditions", {}) if previous else {},
                            "new_message": text, "official_osha_passages": sources},
@@ -243,6 +289,9 @@ class CRSAssistant:
             try:
                 suggestion = self._propose(text, previous, retrieved)
                 conditions, rejected = _safe_conditions(suggestion.get("conditions"))
+                observations, unverified = _safe_observations(suggestion.get("observations"))
+                conditions.update(observations)
+                rejected.extend(unverified)
                 if rejected:
                     warnings.append("Rejected unsupported/unvalidated fields: " + ", ".join(rejected))
                 conflicts = suggestion.get("conflicts", [])
@@ -389,6 +438,8 @@ class CRSAssistant:
             "citations": citations,
             "citation_attribution": citation_attribution,
             "conditions_extracted": conditions,
+            "observations_extracted": {k: v for k, v in conditions.items() if k.startswith("obs_")},
+            "predefined_rules_scope": "excavation_subpart_p_only",
             "conflicts": conflicts, "dependency_proposals": proposals, "candidate_decisions": candidates,
             "candidate_decisions_flagged": flagged,
             "warnings": warnings + ([retrieved["warning"]] if retrieved.get("warning") else []),
