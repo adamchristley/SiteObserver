@@ -122,13 +122,13 @@ def test_generic_scaffold_observation_dependencies_are_versioned(tmp_path):
                              "platform_type": "scaffold"},
             "conflicts": [],
             "status": "Pending Verification",
-            "answer": "Review fall protection against 1926.501, subject to competent verification.",
-            "citations": ["1926.501"],
+            "answer": "Review scaffold guardrails against 1926.451, subject to competent verification.",
+            "citations": ["1926.451(a)"],
             "dependencies": [{"decision_id": "fall_protection_review",
-                              "condition_key": "fall_height_ft", "citation": "1926.501"}],
+                              "condition_key": "fall_height_ft", "citation": "1926.451(a)"}],
             "decisions": [{"decision_id": "fall_protection_review",
                            "status": "requires_review", "rationale": "Unverified guardrails.",
-                           "citations": ["1926.501"],
+                           "citations": ["1926.451(a)"],
                            "condition_keys": ["fall_height_ft", "guardrail_present"]}],
         }
 
