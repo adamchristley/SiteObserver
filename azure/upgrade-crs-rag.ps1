@@ -48,8 +48,9 @@ try {
     throw 'Health/model/index check failed. Historical PDF evidence not available or model disconnected.'
   }
   if ($status.corpus.scope -ne 'full_part_1926' -or
-      $status.corpus.section_count -lt 180 -or
-      @($status.corpus.subparts).Count -lt 22 -or
+      $status.corpus.section_count -lt 260 -or
+      @($status.corpus.subparts).Count -lt 28 -or
+      $status.corpus.appendix_count -lt 25 -or
       $status.corpus.chunks -lt 500) {
     throw 'The new image does not contain the required COMPLETE Part 1926 text. Refusing deployment.'
   }
