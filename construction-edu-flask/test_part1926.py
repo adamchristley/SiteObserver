@@ -27,11 +27,11 @@ def make_bulk_xml():
              '<DIV TYPE="PART" N="1926"><HEAD>Part 1926 Construction Safety</HEAD>']
     names = {"L": "Scaffolds", "M": "Fall Protection", "P": "Excavations",
              "X": "Stairways and Ladders", "AA": "Confined Spaces"}
-    letters = list("ABCDEFGHIJKLMNOPQRSTUVWX") + ["AA"]
+    letters = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ") + ["AA", "BB", "CC"]
     for idx, code in enumerate(letters):
         parts.append(f'<DIV TYPE="SUBPART" N="{code}"><HEAD>Subpart {code} {names.get(code, "Construction")}</HEAD>')
-        for j in range(8):
-            num = 1400 + 10 * idx + j
+        for j in range(9):
+            num = 3000 + 10 * idx + j
             parts.append(f'<DIV TYPE="SECTION" N="1926.{num}"><HEAD>§ 1926.{num} General work equipment.</HEAD>')
             for k in range(3):
                 parts.append(f'<P>({chr(97+k)}) Construction provisions for safe working equipment, '
@@ -48,8 +48,8 @@ def make_bulk_xml():
             for k in range(3):
                 parts.append(f'<P>({chr(97+k)}) {text}; employer duties, training and field verification for workers.</P>')
             parts.append('</DIV>')
-        if code == "L":
-            parts.append('<DIV TYPE="APPENDIX" N="A"><HEAD>Appendix A to Subpart L of Part 1926</HEAD>'
+        if True:
+            parts.append(f'<DIV TYPE="APPENDIX" N="A"><HEAD>Appendix A to Subpart {code} of Part 1926</HEAD>'
                          '<P>Scaffold platforms shall be reviewed using official design charts.</P></DIV>')
         parts.append('</DIV>')
     parts.append('</DIV></ROOT>')
@@ -59,15 +59,16 @@ def make_bulk_xml():
 def test_full_part_not_just_excavations():
     result = parse_part1926(make_bulk_xml())
     assert result["scope"] == "full_part_1926"
-    assert result["section_count"] >= 180
-    assert len(result["subparts"]) >= 22
-    assert result["appendix_count"] >= 1
+    assert result["section_count"] >= 260
+    assert len(result["subparts"]) >= 28
+    assert result["appendix_count"] >= 25
     assert len(result["chunks"]) >= 500
     sections = {c["section"] for c in result["chunks"] if c["section"]}
     assert {"1926.451", "1926.501", "1926.650", "1926.1053", "1926.1203"} <= sections
     assert "1910.1200" not in sections
     assert any(c["subpart"] == "M" for c in result["chunks"])
     assert any(c["citation"] == "1926 Subpart L App A" for c in result["chunks"])
+    assert len({c['subpart'] for c in result['chunks']}) >= 28
 
 
 def test_completeness_gate_rejects_p_only():
@@ -80,11 +81,11 @@ def test_all_part_ingestion_and_subpart_search(tmp_path):
     path = tmp_path / "full.json"
     details = ingest_part1926(path, download=lambda _: make_bulk_xml())
     assert details["scope"] == "full_part_1926"
-    assert details["sections"] >= 180
+    assert details["sections"] >= 260
     assert details["chunks"] >= 500
     index = OSHAIndex(path)
     assert index.status()["scope"] == "full_part_1926"
-    assert index.status()["section_count"] >= 180
+    assert index.status()["section_count"] >= 260
     scaffold = index.search("scaffold platform", subpart="L")
     assert scaffold["chunks"] and all(c["subpart"] == "L" for c in scaffold["chunks"])
     fall = index.search("fall arrest harness", subpart="M")
