@@ -28,8 +28,9 @@ APPENDIX = re.compile(
     re.I,
 )
 SUBPART = re.compile(r"\bSubpart\s+([A-Z]{1,2})\b", re.I)
-MIN_SECTIONS = 180
-MIN_SUBPARTS = 22
+MIN_SECTIONS = 260
+MIN_SUBPARTS = 28
+MIN_APPENDICES = 25
 REQUIRED_SECTIONS = {
     "1926.20", "1926.21", "1926.451", "1926.501", "1926.502",
     "1926.650", "1926.651", "1926.652", "1926.1053", "1926.1203",
@@ -196,10 +197,11 @@ def parse_part1926(xml_data):
 
     walk(part)
     missing = sorted(REQUIRED_SECTIONS - set(sections))
-    if len(sections) < MIN_SECTIONS or len(subparts) < MIN_SUBPARTS or missing:
+    if (len(sections) < MIN_SECTIONS or len(subparts) < MIN_SUBPARTS
+            or len(appendices) < MIN_APPENDICES or missing):
         raise ValueError(
             f"Incomplete Part 1926 corpus: {len(sections)} sections, "
-            f"{len(subparts)} subparts; required sections missing: {missing}. "
+            f"{len(subparts)} subparts, {len(appendices)} appendices; required sections missing: {missing}. "
             "Refusing to deploy incomplete regulatory coverage."
         )
     if len(chunks) < 500:
