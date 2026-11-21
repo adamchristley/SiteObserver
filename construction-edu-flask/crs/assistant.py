@@ -454,6 +454,31 @@ class CRSAssistant:
                             _now()))
         return response
 
+    def fork(self, scenario_id, name, from_branch="base"):
+        """Fork a hypothetical scenario with review-only model context intact."""
+        created = self.engine.branch(scenario_id, name, from_branch)
+        with self.engine._db() as db:
+            edges = db.execute(
+                "SELECT decision_id, condition_key, citation, source "
+                "FROM crs_dynamic_edges WHERE scenario_id=? AND branch=?",
+                (scenario_id, from_branch)).fetchall()
+            for edge in edges:
+                db.execute(
+                    "INSERT OR IGNORE INTO crs_dynamic_edges VALUES (?,?,?,?,?,?,?)",
+                    (scenario_id, name, edge["decision_id"], edge["condition_key"],
+                     edge["citation"], "needs_review", edge["source"]))
+            candidates = db.execute(
+                "SELECT decision_id, citations_json FROM crs_dynamic_decisions "
+                "WHERE scenario_id=? AND branch=?",
+                (scenario_id, from_branch)).fetchall()
+            for item in candidates:
+                db.execute(
+                    "INSERT OR IGNORE INTO crs_dynamic_decisions VALUES (?,?,?,?,?,?,?,?,?)",
+                    (scenario_id, name, item["decision_id"], "requires_review",
+                     "Inherited candidate from another branch. Requires independent review.",
+                     item["citations_json"], 1, 1, "needs_review"))
+        return created
+
     def history(self, scenario_id, branch="base"):
         self.engine.get(scenario_id, branch)
         with self.engine._db() as db:
