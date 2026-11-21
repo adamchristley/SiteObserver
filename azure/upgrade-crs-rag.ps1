@@ -47,6 +47,25 @@ try {
       -not $status.corpus.ready -or $status.corpus.reference_2025_chunks -lt 60) {
     throw 'Health/model/index check failed. Historical PDF evidence not available or model disconnected.'
   }
+  if ($status.corpus.scope -ne 'full_part_1926' -or
+      $status.corpus.section_count -lt 180 -or
+      @($status.corpus.subparts).Count -lt 22 -or
+      $status.corpus.chunks -lt 500) {
+    throw 'The new image does not contain the required COMPLETE Part 1926 text. Refusing deployment.'
+  }
+  foreach ($check in @(
+      @{query='1926.451 scaffold';subpart='L';section='1926.451'},
+      @{query='1926.501 fall protection';subpart='M';section='1926.501'},
+      @{query='1926.651 excavation';subpart='P';section='1926.651'},
+      @{query='1926.1053 ladder';subpart='X';section='1926.1053'},
+      @{query='1926.1203 confined spaces';subpart='AA';section='1926.1203'}
+    )) {
+    $url = "$base/api/crs/assistant/search?q=$([uri]::EscapeDataString($check.query))&subpart=$($check.subpart)"
+    $match = Invoke-RestMethod -Uri $url -Headers $headers -TimeoutSec 30
+    if (-not @($match.chunks | Where-Object { $_.citation.StartsWith($check.section) }).Count) {
+      throw "Part 1926 search smoke check failed for section $($check.section)."
+    }
+  }
   Write-Host 'Running two synthetic LLM scenario tests. Model token charges may apply.'
   $firstPayload = @{text='Workers are inside a six-foot trench without a protective system. Soil is not stable rock.'} | ConvertTo-Json
   $first = Invoke-RestMethod "$base/api/crs/assistant" -Method Post -Headers $headers -ContentType 'application/json' -Body $firstPayload -TimeoutSec 90
@@ -67,6 +86,8 @@ try {
   Write-Host 'LIVE UPGRADE VERIFIED'
   Write-Host "SiteObserver: $base"
   Write-Host "Revision: $($after.properties.latestReadyRevisionName)"
+  Write-Host "Part 1926 sections: $($status.corpus.section_count)"
+  Write-Host "Subparts indexed: $(@($status.corpus.subparts).Count)"
   Write-Host "Regulatory passages: $($status.corpus.chunks)"
   Write-Host "2025 historical PDF excerpts: $($status.corpus.reference_2025_chunks)"
   Write-Host "Citation attribution on test: $($first.citation_attribution)"
