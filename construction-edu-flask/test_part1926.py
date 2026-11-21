@@ -147,3 +147,30 @@ def test_generic_scaffold_observation_dependencies_are_versioned(tmp_path):
     assert second["scenario"]["conditions"]["obs_fall_height_ft"] == 18
     assert "fall_protection_review" in second["candidate_decisions_flagged"]
     assert assistant.graph(sid)["candidate_decisions"][0]["evaluation_count"] == 2
+
+
+def test_authenticated_full_part_search_api(tmp_path, monkeypatch):
+    from crs.document_rag import get_index
+    path = tmp_path / "part1926.json"
+    ingest_part1926(path, download=lambda _: make_bulk_xml())
+    monkeypatch.setenv("CRS_OSHA_CORPUS_PATH", str(path))
+    monkeypatch.setenv("CRS_API_KEY", "unit-test-only-key")
+    monkeypatch.setenv("CRS_DB_PATH", str(tmp_path / "api.sqlite3"))
+    monkeypatch.delenv("CRS_DATABASE_URL", raising=False)
+    monkeypatch.delenv("CRS_REQUIRE_DURABLE_DB", raising=False)
+    get_index.cache_clear()
+    try:
+        from app import app
+        client = app.test_client()
+        assert client.get("/api/crs/assistant/search?q=fall+arrest&subpart=M").status_code == 403
+        head = {"Authorization": "Bearer unit-test-only-key"}
+        status = client.get("/api/crs/assistant/status", headers=head)
+        assert status.status_code == 200
+        assert status.json["corpus"]["scope"] == "full_part_1926"
+        found = client.get("/api/crs/assistant/search?q=fall+arrest&subpart=M", headers=head)
+        assert found.status_code == 200
+        assert found.json["scope"] == "full_part_1926"
+        assert all(item["subpart"] == "M" for item in found.json["chunks"])
+        assert client.get("/api/crs/assistant/search?q=fall&subpart=MZQ", headers=head).status_code == 400
+    finally:
+        get_index.cache_clear()
