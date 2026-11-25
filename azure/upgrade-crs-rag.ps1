@@ -44,7 +44,7 @@ try {
   $health = Invoke-RestMethod "$base/api/health" -TimeoutSec 30
   $status = Invoke-RestMethod "$base/api/crs/assistant/status" -Headers $headers -TimeoutSec 30
   if ($health.status -ne 'ok' -or -not $status.model_configured -or
-      -not $status.corpus.ready -or $status.corpus.reference_2025_chunks -lt 60) {
+      -not $status.corpus.ready -or $status.corpus.edition -ne '2025-07-01') {
     throw 'Health/model/index check failed. Historical PDF evidence not available or model disconnected.'
   }
   if ($status.corpus.scope -ne 'full_part_1926' -or
@@ -90,7 +90,7 @@ try {
   Write-Host "Part 1926 sections: $($status.corpus.section_count)"
   Write-Host "Subparts indexed: $(@($status.corpus.subparts).Count)"
   Write-Host "Regulatory passages: $($status.corpus.chunks)"
-  Write-Host "2025 historical PDF excerpts: $($status.corpus.reference_2025_chunks)"
+  Write-Host "Annual edition: $($status.corpus.edition)"
   Write-Host "Citation attribution on test: $($first.citation_attribution)"
   Write-Host 'GPT-4.1 mini inference: PASS'
   Write-Host 'Scenario version 1 to 2: PASS'

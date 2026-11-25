@@ -1,6 +1,10 @@
 # SiteObserver: All of 29 CFR Part 1926
 
-## Purpose and current implementation
+## July 2025 evaluation corpus
+
+The current Docker build indexes the complete 2025 annual Part 1926 granule from GovInfo. It checks the edition, full source SHA-256 and structural inventory. The earlier rolling eCFR build documented below is retained here for historical comparison. See [the evaluation handoff](EX01_EVALUATION_HANDOFF.md).
+
+## Earlier rolling eCFR implementation
 
 SiteObserver now ingests the entire official 29 CFR Part 1926 text snapshot at Docker build time. This expands the OSHA corpus beyond Excavations (Subpart P) to other construction safety regulations, appendices and associated headings. It does **not** turn the six existing excavation checks into a complete OSHA compliance engine. The broader model only proposes research findings for human review.
 

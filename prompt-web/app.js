@@ -71,7 +71,7 @@ async function loadStatus() {
       (s.corpus.section_count || 'Unknown') + ' regulatory sections, ' +
       (s.corpus.subparts?.length || 'unknown') + ' subparts, and ' + s.corpus.chunks +
       ' indexed passages. Historical 2025 excerpts: ' + (s.corpus.reference_2025_chunks || 0) +
-      '. Snapshot: ' + (s.corpus.retrieved_at || 'unknown') :
+      '. Indexed: ' + (s.corpus.retrieved_at || 'unknown') :
       'Official Part 1926 source-text archive is not installed. Regulatory coverage is incomplete.';
     const select = $('#subpart-filter');
     select.replaceChildren(new Option('All Part 1926 subparts', ''));
@@ -81,7 +81,42 @@ async function loadStatus() {
     }
   } catch (err) { alertError(err.message); }
 }
+function renderAssessment(result) {
+  const title = (key) => key.replaceAll('_', ' ');
+  $('#current-status').textContent = result?.status || 'Awaiting a site report';
+  $('#current-decisions').replaceChildren();
+  $('#change-summary').replaceChildren();
+  $('#actions').replaceChildren();
+  $('#evidence').replaceChildren();
+  $('#print-brief').disabled = !result;
+  $('#raw-response').textContent = result ? JSON.stringify(result, null, 2) : '';
+  if (!result) return;
+  for (const finding of result.task_decisions || []) {
+    $('#current-decisions').append(D('p', 'finding', title(finding.decision_id) + ' · ' + finding.status));
+  }
+  for (const key of ['changed', 'unchanged', 'retired']) {
+    const ids = result.decision_summary?.[key] || [];
+    if (ids.length) $('#change-summary').append(D('p', 'muted', title(key) + ' · ' + ids.map(title).join(', ')));
+  }
+  if (result.warnings?.includes('Requires Expert Review')) $('#current-status').append(D('small', '', ' · Requires Expert Review'));
+  const actions = result.required_actions || [];
+  for (const action of actions) $('#actions').append(D('li', '', action));
+  if (!actions.length) $('#actions').append(D('li', '', result.status === 'Approved' ? 'Reassess if conditions change.' : 'Review the assessment with a competent person.'));
+  const cited = result.citation_attribution === 'retrieval_only' ? [] : result.cited_osha;
+  renderEvidence(cited);
+}
+$('#print-brief').addEventListener('click', () => window.print());
+async function loadConversation() {
+  const turns = await api('/api/crs/assistant/' + state.scenario.scenario_id + '/history?branch=' + encodeURIComponent(state.branch));
+  $('#messages').replaceChildren();
+  for (const turn of turns) {
+    appendMessage('user', 'Your report', turn.user_text);
+    appendMessage('assistant', 'Assessment', turn.result.answer, turn.result.status);
+  }
+  renderAssessment(turns.at(-1)?.result);
+}
 function clearScenario() {
+  renderAssessment(null);
   state.scenario = null;
   state.branch = 'base';
   $('#branch-select').replaceChildren(new Option('Base facts', 'base'));
@@ -106,6 +141,7 @@ $('#branch-select').addEventListener('change', async (event) => {
       const view = await api('/api/crs/scenarios/' + state.scenario.scenario_id + '?branch=' + encodeURIComponent(state.branch));
       state.scenario = view;
       renderScenario(view);
+      await loadConversation();
       await refreshDetails();
     } catch (err) { alertError(err.message); }
   }
@@ -123,6 +159,7 @@ $('#create-branch').addEventListener('click', async () => {
     state.branch = name;
     state.scenario = view;
     renderScenario(view);
+      await loadConversation();
     await refreshDetails();
     alertError('');
   } catch (err) { alertError(err.message); }
@@ -159,7 +196,7 @@ function renderScenario(view) {
 function renderEvidence(list, rootSelector = '#evidence') {
   const root = $(rootSelector);
   root.replaceChildren();
-  if (!list?.length) return root.append(D('p', 'muted', 'No directly retrieved source passages for this request.'));
+  if (!list?.length) return root.append(D('p', 'muted', 'No supporting paragraph identified.'));
   for (const item of list) {
     const article = D('article', 'source-result');
     const heading = D('div', 'source-heading');
@@ -180,8 +217,7 @@ function renderEvidence(list, rootSelector = '#evidence') {
     }
     if (item.edition) {
       article.append(D('small', 'source-edition',
-        'Historical ' + item.edition + ' · supplied CFR PDF · page ' + item.pdf_page +
-        ' · charts/figures may require original PDF'));
+        'Annual edition ' + item.edition + (item.pdf_page ? ' · PDF page ' + item.pdf_page : '')));
     } else {
       article.append(D('small', 'source-edition', 'Official source-text retrieval snapshot'));
     }
@@ -268,7 +304,7 @@ $('#message-form').addEventListener('submit', async (event) => {
       renderScenario(result.scenario);
       await refreshDetails();
     }
-    renderEvidence(result.retrieved_osha || result.cited_osha);
+    renderAssessment(result);
     if (result.citation_attribution === 'retrieval_only') {
       $('#conversation-state').textContent = 'Retrieved sources shown; model citations require verification';
     }

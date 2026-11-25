@@ -122,7 +122,8 @@ def test_bad_model_fields_and_fake_citations_do_not_get_persisted(tmp_path):
 
     assistant = CRSAssistant(engine, index=index, infer=malicious_llm)
     response = assistant.analyze("6 foot trench")
-    assert response["status"] == "Requires Expert Review"
+    assert response["status"] == "Insufficient Information"
+    assert "Requires Expert Review" in response["warnings"]
     assert "confirmed_safe" not in response["scenario"]["conditions"]
     assert not response["model_citations"]
     assert response["citation_attribution"] == "retrieval_only"

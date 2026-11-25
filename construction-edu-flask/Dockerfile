@@ -5,7 +5,7 @@ RUN pip install --no-cache-dir Flask==3.1.1 gunicorn==23.0.0 'psycopg[binary]>=3
     useradd --create-home --uid 10001 webuser
 COPY construction-edu-flask/app.py construction-edu-flask/crs_engine.py ./
 COPY construction-edu-flask/crs/ ./crs/
-RUN python -m crs.part1926_ingest --output /app/crs/data/osha_corpus.json
+RUN python -m crs.annual_cfr --output /app/crs/data/osha_corpus.json
 COPY prompt-web/index.html prompt-web/app.js prompt-web/styles.css ./prompt-web/
 USER webuser
 EXPOSE 8000

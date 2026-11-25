@@ -1,52 +1,37 @@
-# EX-01 evaluation and historical OSHA reference handoff
+# Conversational assessment and private functional evaluation
 
-## What this revision fixes
+The conversational assessment uses the July 1, 2025 annual edition of 29 CFR Part 1926. The Docker build verifies the GovInfo granule digest and inventory before indexing it. The reported 304 section entries include reserved entries and ranges. The source also contains 40 appendices and 29 named subparts, including reserved BB. Figures and complex engineering tables still require inspection of the official source. This edition is a fixed research reference.
 
-The assistant now always includes actually retrieved OSHA passages in the response field retrieved_osha. Its citation_attribution field distinguishes model_supported, retrieval_only and none. A retrieval-only reference does NOT prove the model cited or correctly applied that source.
+| Research status | Criterion |
+| --- | --- |
+| Approved | The defined task has affirmative evidence for all applicable scoped checks, including the competent person's verification of applicable hazards. |
+| Not Approved | A reported condition or proposed operation fails an applicable requirement. |
+| Pending Verification | A specific report, correction, conflict or proposed control requires verification. |
+| Insufficient Information | An essential fact is missing and no stronger conclusion is supported. |
 
-The supplied July 2025 Part 1926 Subpart P is separately indexed as a historical reference, with 85 extracted text passages, pages 337 to 373, the source PDF SHA-256 and explicit edition metadata. Newer build-time OSHA/GovInfo source text is retained as the primary corpus. The supplied 2025 PDF contains diagrams and engineering figures in its appendices that are not reliably searchable from the extracted text; these require review in the original PDF.
+Approved applies only to the stipulated research task. Authorized site personnel retain work authorization. Requires Expert Review is a warning. The lower-level diagnostics retain their original schema for existing API clients.
 
-## Private 15-turn live evaluation
+Each scoped finding stores its current status, paragraph identifiers, version, reason and the state IDs of facts used. Missing prerequisites are recorded so that later evidence can trigger reassessment. Read the changed, reassessed, unchanged and retired sets separately. A decision can be reassessed and keep its status. An inherited approval applies only to its original area and conditions. The chat pane exposes current findings, actions and source passages. Developer Mode contains implementation diagnostics. Generate brief opens the print view for the current assessment.
 
-The adviser workbook EX-01_15_Dialogues_Ground_Truth.xlsx was intentionally not committed to this public GitHub repository.
+## Run the private workbook locally
 
-1. Open Azure Cloud Shell at https://shell.azure.com/ and select PowerShell.
-2. Use Manage files > Upload to upload the attached EX-01_15_Dialogues_Ground_Truth.xlsx to /home/achristl/.
-3. After deploying the merged fixes, run:
+Using Python with Flask and Beautiful Soup installed, from the repository root:
 
-    cd /home/achristl/SiteObserver
-    git pull origin main
-    $rg = "rg-siteobserver-reu"
-    $app = "construction-edu-demo"
-    $key = az containerapp secret show --name $app --resource-group $rg --secret-name crs-api-key --query value -o tsv
-    $env:SITEOBSERVER_API_KEY = $key
-    Remove-Variable key
-    try {
-      python azure/run_ex01_live.py /home/achristl/EX-01_15_Dialogues_Ground_Truth.xlsx --base https://construction-edu-demo.graydesert-cb959016.northcentralus.azurecontainerapps.io --output /home/achristl/ex01-live-results.json --confirm-model-billing
-    } finally {
-      Remove-Item Env:SITEOBSERVER_API_KEY -ErrorAction SilentlyContinue
-    }
+```sh
+(cd construction-edu-flask && python -m crs.annual_cfr)
+python azure/run_ex01_live.py /path/to/original.xlsx --local --output /private/path/local-evaluation.json
+```
 
-This makes up to 15 potentially billed GPT-4.1 mini requests and creates synthetic scenarios in the persistent research database. It does not commit the test workbook or expose secret values.
+The local run uses Flask endpoints, isolated SQLite state and deterministic extraction. The workbook is opened read-only. Only the input column is sent to the assistant. The report contains private scenario facts, evidence and reasoning. Keep it outside the repository.
 
-The JSON report includes each expected versus actual status, section-level OSHA recall, model-supported citations, conflict flags, version increments, selective reassessment and dependency proposal counts. It does not contain the raw dialogue inputs.
+## Run on the updated Azure deployment
 
-## Interpreting the adviser benchmarks
+After deploying the tested revision with the existing Azure upgrade script, run this from an authenticated environment with SITEOBSERVER_API_KEY set:
 
-The workbook contains 15 turns in three distinct dialogues (shield and worker exposure, depth and soil protection, egress and conflicting reports). The expected outcome for EX-01-B2 is Approved. The research system intentionally cannot issue field-work approval, so exact match on the full workbook cannot reach 100% without an advisor decision about how to label hypothetical approvals. Do not silently change the workbook or treat a safe-sounding model output as permission to begin construction.
+```sh
+python azure/run_ex01_live.py /path/to/original.xlsx --base "$SITEOBSERVER_BASE" --output /private/path/live-evaluation.json --confirm-model-billing
+```
 
-Model citations from the retrieved passages are distinct from retrieval-only references. Section-level recall is a research metric; it does not establish paragraph-level legal applicability. Human expert review remains necessary.
+The live run verifies the corpus edition and scope, checks inference mode on each turn, and creates synthetic research scenarios. Keep the original baseline. Compare status exact matches, paragraph precision and recall, changed conditions, missed and unnecessary reassessments, retained evidence and each decision's dependencies against the workbook narratives. Model-attributed citations, rule-supported citations and search hits have different meanings. The workbook has prose decision updates rather than exhaustive edge annotations. Document any reviewer interpretation separately.
 
-## Deploy this revision
-
-After the fix PR is merged, wait for the main-branch GHCR publish workflow to succeed. Then in Cloud Shell PowerShell:
-
-    cd /home/achristl/SiteObserver
-    git pull origin main
-    ./azure/upgrade-crs-rag.ps1 -ImageTag <VERIFIED-FULL-MAIN-COMMIT-SHA>
-
-The script preserves PostgreSQL and Foundry secrets, tests the indexed 2025 reference, and runs two synthetic model/database checks. It attempts rollback to the previous image if verification fails.
-
-## Limitations
-
-This is a research prototype, not an operational OSHA compliance service. The historical PDF excerpts are text-only, the current primary source is a snapshot, and model-generated dependency edges remain unapproved proposals. Before publication or field use, evaluate every dialogue with expert review, accuracy and citation precision; address appendix diagrams, regulatory change monitoring, identity/access controls and multiuser isolation.
+Formal evaluation requires unseen dialogues and independent review of the decisions and the applicability of the cited paragraphs.

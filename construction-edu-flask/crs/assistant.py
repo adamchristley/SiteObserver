@@ -15,7 +15,8 @@ import re
 
 from crs_engine import ALL_FIELDS, RULES, CRSInputError, validate_changes, allowed_fact_key
 from .document_rag import OSHAIndex
-from .extractor import extract_conditions
+from .site_updates import site_update
+from . import task_decisions as task
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS crs_assistant_turns (
@@ -41,8 +42,7 @@ CREATE TABLE IF NOT EXISTS crs_dynamic_decisions (
   PRIMARY KEY (scenario_id, branch, decision_id)
 );
 """
-VALID_STATUS = {"Insufficient Information", "Pending Verification",
-                "Not Approved", "Requires Expert Review"}
+VALID_STATUS = set(task.CRITERIA)
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 LIMIT = 2000
 
@@ -223,7 +223,7 @@ class CRSAssistant:
              "title": item.get("title"),
              "source_url": item.get("source_url"),
              "text": item.get("text", item.get("summary", ""))[:1150]}
-            for item in evidence[:8]
+            for item in evidence[:20]
         ]
         system = (
             "You are a conservative construction-safety RESEARCH assistant, not a safety approver. "
@@ -233,13 +233,13 @@ class CRSAssistant:
             "Conflicting testimony must be flagged and left unresolved. "
             "Hypothetical claims must not silently change the original scenario. "
             "Copy the relevant citation identifier EXACTLY from the supplied sources into citations; never invent or paraphrase identifiers. "
-            "Do not output Approved or assert field compliance certification. "
-            "The model suggests dependency edges, which require human review. "
+            "Approved means the evidence supports only the defined simulated task. Never authorize field work. "
+            "Use these criteria:  " + json.dumps(task.CRITERIA) + ". Requires Expert Review is an optional warning. The model suggests dependency edges for review. "
             "Return a JSON object with keys conditions (predefined excavation facts only), " 
             "observations (other explicitly reported construction facts, using descriptive snake_case keys), " 
             "conflicts (string list), "
             "answer (cautious concise analysis), status (one of Insufficient Information, "
-            "Pending Verification, Not Approved, Requires Expert Review), citations "
+            "Pending Verification, Not Approved, Approved), citations "
             "(exact citation strings from sources), dependencies "
             "(list of objects containing decision_id, condition_key, citation), and decisions (list of objects with decision_id, status, rationale, citations, condition_keys). Decision statuses must be undetermined, noncompliant, or requires_review. Never use compliant as an LLM decision status. "
             "If a fact is unknown, omit it from conditions. "
@@ -280,14 +280,39 @@ class CRSAssistant:
                     "WHERE scenario_id=? AND branch=?",
                     (scenario_id, branch)).fetchall()
             prior_citations = [row["citation"] for row in rows]
-        query = text + (" " + json.dumps(previous["conditions"]) if previous else "")
-        if prior_citations:
+        prior = previous["conditions"] if previous else {}
+        parsed, separate = site_update(text, prior)
+        if separate and previous and branch == "base":
+            raise CRSInputError("Create a branch for a separate excavation before changing its conditions")
+        context = {} if separate else prior
+        preview = {**context, **parsed}
+        query = text + (" " + json.dumps(context) if context else "")
+        if prior_citations and not separate:
             query += " " + " ".join(prior_citations[:20])
         retrieved = self.index.search(query[:4000])
+        def rule_sources(findings):
+            paragraphs = getattr(self.index, "paragraphs", {})
+            return [paragraphs[c][0] for c in dict.fromkeys(
+                c for f in findings if f for c in f[2]) if c in paragraphs]
+
+        changed_keys = {k for k in parsed if parsed[k] != context.get(k)}
+        prior_tasks = {f["decision_id"]: f for f in (previous or {}).get("task_findings", [])}
+        initial_findings = []
+        for name, check in task.CHECKS.items():
+            old = prior_tasks.get(name)
+            if old and not separate and changed_keys.isdisjoint(old["dependencies"]):
+                if old["status"]:
+                    initial_findings.append((old["status"], old["reason"], old["citations"]))
+            else:
+                initial_findings.append(task.evaluate_check(check, preview)[1])
+        initial = rule_sources(initial_findings)
+        if initial:
+            ids = {p["id"] for p in initial}
+            retrieved["chunks"] = initial + [p for p in retrieved.get("chunks", []) if p["id"] not in ids]
         warnings = []
         if self.infer:
             try:
-                suggestion = self._propose(text, previous, retrieved)
+                suggestion = self._propose(text, {"conditions": context}, retrieved)
                 conditions, rejected = _safe_conditions(suggestion.get("conditions"))
                 observations, unverified = _safe_observations(suggestion.get("observations"))
                 conditions.update(observations)
@@ -305,14 +330,16 @@ class CRSAssistant:
                 answer = str(raw_answer)[:4000] if raw_answer else "The model did not return a usable assessment."
                 status = suggestion.get("status")
                 if status not in VALID_STATUS:
-                    status = "Requires Expert Review"
+                    status = task.UNKNOWN
+                    warnings.append("Requires Expert Review")
                     answer = "The model response cannot authorize work. Researcher review is required."
                 if re.search(r"\b(approved for work|safe to proceed|safe to enter|certified compliant)\b",
                              answer, re.I):
                     answer = "The model attempted to issue an unsupported safety approval. Expert review required."
-                    status = "Requires Expert Review"
+                    status = task.UNKNOWN
+                    warnings.append("Requires Expert Review")
                 model_mode = "azure_openai"
-                present = {**(previous["conditions"] if previous else {}), **conditions}
+                present = {**context, **conditions, **parsed}
                 allowed_citations = list(dict.fromkeys([
                     source.get("citation", source.get("id"))
                     for source in (retrieved.get("chunks", []) or retrieved.get("catalog_matches", []))
@@ -320,6 +347,10 @@ class CRSAssistant:
                 proposals = _grounded_edges(suggestion.get("dependencies"), present, allowed_citations)
                 candidates = _grounded_decisions(suggestion.get("decisions"), present, allowed_citations)
                 for candidate in candidates:
+                    # An inferred edge with multiple possible paragraphs needs an
+                    # explicit mapping. Do not attach every condition to the first.
+                    if len(candidate["citations"]) != 1:
+                        continue
                     for key in candidate["condition_keys"]:
                         edge = {"decision_id": candidate["decision_id"], "condition_key": key,
                                 "citation": candidate["citations"][0],
@@ -339,10 +370,7 @@ class CRSAssistant:
             warnings.append("Azure OpenAI is not configured; only deterministic fact extraction and retrieval are available.")
 
         if model_mode == "rule_based":
-            try:
-                conditions = extract_conditions(text)["conditions"]
-            except CRSInputError:
-                conditions = {}
+            conditions = {}
             if retrieved.get("chunks"):
                 citations = [x["citation"] for x in retrieved["chunks"][:5]]
                 answer = ("Relevant OSHA provisions were retrieved. A model-generated assessment "
@@ -352,6 +380,23 @@ class CRSAssistant:
                           "The limited curated catalog cannot support a document-grounded assessment.")
             status = "Insufficient Information"
 
+        # Reports of verification, actual measurements and proposed controls have
+        # distinct meanings. A model cannot independently verify the approval gates.
+        for key in ("task_hazards_verified", "ladder_distance_verified", "evacuation_planned"):
+            if key not in parsed:
+                conditions.pop(key, None)
+        conditions.update(parsed)
+        conditions.pop("work_area", None)
+        if separate:
+            conditions["work_area"] = prior.get("work_area", 0) + 1
+            conditions = {**dict.fromkeys(prior), **conditions}
+        if parsed.get("planned_depth_ft") is not None:
+            for key in ("depth_ft", "soil_type", "safe_egress_within_25ft"):
+                conditions.pop(key, None)
+        if parsed.get("ladder_distance_conflicted"):
+            conflicts = ["Disputed lateral travel distances require a site measurement."]
+        elif parsed.get("ladder_distance_verified"):
+            conflicts = [x for x in conflicts if not re.search(r"ladder|distance", x, re.I)]
         # Always expose source passages separately from model-grounded citations.
         # A retrieved hit is not evidence that the model attributed its answer.
         evidence = retrieved.get("chunks", []) or retrieved.get("catalog_matches", [])
@@ -367,12 +412,15 @@ class CRSAssistant:
                                 "retrieval_only" if retrieved_citations else "none")
 
         # If no additional facts are known, allow question-answering without mutating state.
+        if status == task.YES:
+            status = task.WAIT
+            answer = "Verify the model-proposed finding against the cited requirements."
         if previous is None:
             scenario = self.engine.create(conditions) if conditions else None
         elif conditions:
             scenario = self.engine.revise(scenario_id, conditions, branch, expected_version)
         else:
-            scenario = self.engine.get(scenario_id, branch)
+            scenario = self.engine.revise(scenario_id, {"depth_ft": prior.get("depth_ft")}, branch, expected_version)
 
         flagged = []
         if scenario:
@@ -393,7 +441,17 @@ class CRSAssistant:
                             "UPDATE crs_dynamic_edges SET review_status=? WHERE "
                             "scenario_id=? AND branch=? AND decision_id=?",
                             ("needs_review", scenario_id, branch, name))
+                # Replace an affected candidate's proposed dependency set when
+                # a fresh assessment is available. Preserve unaffected candidates.
+                refreshed = {c["decision_id"] for c in candidates} & set(flagged)
+                for name in refreshed:
+                    db.execute("DELETE FROM crs_dynamic_edges WHERE scenario_id=? AND branch=? AND decision_id=?",
+                               (scenario_id, branch, name))
+                existing = {r["decision_id"] for r in db.execute(
+                    "SELECT decision_id FROM crs_dynamic_decisions WHERE scenario_id=? AND branch=?", (scenario_id, branch))}
                 for edge in proposals:
+                    if edge["decision_id"] in existing and edge["decision_id"] not in flagged:
+                        continue
                     db.execute(
                         "INSERT OR IGNORE INTO crs_dynamic_edges VALUES (?,?,?,?,?,?,?)",
                         (scenario_id, branch, edge["decision_id"], edge["condition_key"],
@@ -422,6 +480,11 @@ class CRSAssistant:
                             (scenario_id, branch, name, candidate["status"],
                              candidate["rationale"], json.dumps(candidate["citations"]),
                              version, 1, "proposed"))
+                for name in set(flagged) - refreshed:
+                    db.execute("UPDATE crs_dynamic_decisions SET status=?, rationale=?, evaluated_version=?, "
+                               "evaluation_count=evaluation_count+1 WHERE scenario_id=? AND branch=? AND decision_id=?",
+                               ("undetermined", "A dependency changed and no grounded replacement finding was returned.",
+                                version, scenario_id, branch, name))
                 for name in flagged:
                     db.execute(
                         "UPDATE crs_dynamic_decisions SET review_status=? WHERE "
@@ -430,10 +493,64 @@ class CRSAssistant:
         else:
             version = 0
 
+        findings = [f for f in (scenario or {}).get("task_findings", []) if f["status"]]
+        decision_summary = {}
+        actions = []
+        if findings:
+            state = scenario["conditions"]
+            changes = list(changes)
+            revised = previous is None or scenario["version"] != previous["version"]
+            retired = [f for f in scenario["task_findings"] if revised and f["evaluated_version"] == version
+                       and f["previous_status"] and not f["status"]]
+            reassessed = [f for f in findings if revised and f["evaluated_version"] == version] + retired
+            changed = [f for f in reassessed if f["previous_status"] != f["status"]]
+            decision_summary = {
+                "retired": [f["decision_id"] for f in retired], "changed_conditions": changes, "reassessed": [f["decision_id"] for f in reassessed],
+                "changed": [f["decision_id"] for f in changed],
+                "unchanged": [f["decision_id"] for f in findings if f not in changed],
+            }
+            status = task.classify(findings, state, scenario["decisions"])
+            # An evacuation proposal changes the movement assessment only. Preserve
+            # a separate stop on reentry into the previously exposed location.
+            scoped_move = parsed.get("evacuation_planned") and any(f["decision_id"] == "shield_movement" for f in findings)
+            legacy_failures = [d for d in scenario["decisions"] if d["status"] == "noncompliant"
+                               and d["decision_id"] not in {"assessed_rules_summary", "inspection", "protective_system", "trench_egress"}]
+            if scoped_move and not legacy_failures and all(
+                    f["status"] != task.NO or f["decision_id"] == "worker_coverage" for f in findings):
+                status = task.WAIT
+            support = rule_sources((f["status"], f["reason"], f["citations"]) for f in findings)
+            for decision in legacy_failures:
+                paragraph = _canonical_citation(RULES[decision["decision_id"]]["regulation"])
+                support.extend(rule_sources([(None, None, [paragraph])]))
+            if status == task.YES and (conflicts or set(c for f in findings for c in f["citations"]) - {p["citation"] for p in support}):
+                status = task.WAIT
+                warnings.append("Requires Expert Review")
+            actions = [f["reason"] for f in findings if f["status"] != task.YES]
+            actions.extend(d["rationale"] for d in legacy_failures)
+            if conflicts and status != task.NO:
+                status = task.WAIT
+            if status == task.YES:
+                answer = "Approved for the defined research task under the reported conditions. " + " ".join(f["reason"] for f in findings)
+            else:
+                answer = ("Movement plan only. " if scoped_move else "") + " ".join(actions)
+            indexed = {p["citation"]: p for p in support}
+            for f in findings:
+                f["paragraph_evidence"] = [
+                    {k: indexed[c][k] for k in ("id", "citation", "edition", "sha256")}
+                    for c in f["citations"] if c in indexed]
+            if support:
+                evidence = support + [p for p in evidence if p not in support]
+                citations = list(dict.fromkeys(p["citation"] for p in support))
+                citation_attribution = "rule_supported"
         response = {
-            "mode": model_mode, "answer": answer, "status": status,
+            "task_decisions": findings, "decision_summary": decision_summary, "required_actions": actions,
+            "fact_evidence": [{"condition": f["condition"], "value": f["value"], "state_id": f["state_id"],
+                               "source_report": text, "branch": branch, "version": version}
+                              for f in (scenario or {}).get("active_states", [])
+                              if f["condition"] in decision_summary.get("changed_conditions", [])],
+            "status_criteria": task.CRITERIA, "mode": model_mode, "answer": answer, "status": status,
             "cited_osha": [r for r in evidence if r.get("citation", r.get("id")) in citations],
-            "retrieved_osha": evidence[:8],
+            "retrieved_osha": evidence,
             "model_citations": model_citations,
             "citations": citations,
             "citation_attribution": citation_attribution,
@@ -444,7 +561,7 @@ class CRSAssistant:
             "candidate_decisions_flagged": flagged,
             "warnings": warnings + ([retrieved["warning"]] if retrieved.get("warning") else []),
             "scenario": scenario, "retrieval_mode": retrieved.get("mode"),
-            "disclaimer": "Research only. Never use this system to authorize field work.",
+            "disclaimer": "Approved is a research finding for the defined task. Only authorized site personnel can authorize field work.",
         }
         if scenario:
             with self.engine._db() as db:
@@ -507,6 +624,7 @@ class CRSAssistant:
             for name, rule in RULES.items() for key in rule["dependencies"]
         ]
         return {"scenario_id": scenario_id, "branch": branch, "version": scenario["version"],
+                "task_decisions": [f for f in scenario["task_findings"] if f["status"]],
                 "deterministic_edges": deterministic,
                 "proposed_edges": [dict(p) for p in proposals],
                 "candidate_decisions": [
