@@ -50,3 +50,22 @@ def test_evidence_survives_unrelated_update(tmp_path):
     assert route(new) == old
     assert next(f for f in new["task_findings"] if f["decision_id"] == "water_precautions")["status"] == t.WAIT
     assert old["dependencies"]["ladder_distance_conflicted"]["state_id"]
+
+
+def test_atomic_assessment_rollback(tmp_path):
+    db = CRSEngine(tmp_path / "rollback.db")
+    s = db.create({"depth_ft": 3})
+    with pytest.raises(RuntimeError):
+        with db.atomic():
+            db.revise(s["scenario_id"], {"depth_ft": 9}, expected_version=1)
+            raise RuntimeError("interrupted audit write")
+    assert db.get(s["scenario_id"])["conditions"]["depth_ft"] == 3
+
+
+def test_quote_matches_the_specific_paragraph():
+    from crs.assistant import _paragraph_quotes
+    p = {"citation":"1926.651(c)(2)", "text":"no more than 25 feet of lateral travel",
+         "id":"p1", "sha256":"digest", "edition":"2025-07-01"}
+    item = {"citation":p["citation"], "quote":p["text"], "claim":"Lateral travel limit"}
+    assert len(_paragraph_quotes([item], [p], [p["citation"]])) == 1
+    assert not _paragraph_quotes([{**item, "quote":"no more than 50 feet of lateral travel"}], [p], [p["citation"]])

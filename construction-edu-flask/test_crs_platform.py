@@ -202,7 +202,7 @@ def test_model_normalized_citation_and_unknown_citation_rejected(tmp_path):
                 "citations": ["29 CFR § 1926.652(a)(1)", "29 CFR 1926.999(z)"]}
     result = CRSAssistant(engine, index=index, infer=cites).analyze(
         "Trench cave-in protective system depth six feet")
-    assert result["citation_attribution"] == "model_supported"
+    assert result["citation_attribution"] == "model_attributed"
     assert result["model_citations"] == ["1926.652(a)(1)"]
     assert "1926.999(z)" not in result["citations"]
 

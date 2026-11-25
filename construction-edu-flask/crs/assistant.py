@@ -125,6 +125,27 @@ def _grounded_citations(raw, retrieved):
 
 
 
+def _paragraph_quotes(raw, passages, attributed):
+    """Verify a proposed quote against the exact annual paragraph shown to the model."""
+    out = []
+    for entry in raw if isinstance(raw, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        citation = _canonical_citation(entry.get("citation"))
+        quote, claim = entry.get("quote"), entry.get("claim")
+        if citation not in attributed or not isinstance(claim, str) or not claim.strip():
+            continue
+        if not isinstance(quote, str) or not 16 <= len(quote.strip()) <= 600:
+            continue
+        for doc in passages[:20]:
+            if (doc.get("citation") == citation and doc.get("edition") == "2025-07-01"
+                    and "(" in citation and quote.strip() in doc["text"][:1150]):
+                out.append({"citation": citation, "claim": claim[:600], "quote": quote.strip(),
+                            "passage_id": doc["id"], "sha256": doc["sha256"]})
+                break
+    return out
+
+
 def _safe_observations(raw):
     """Convert broad construction reports to unverified, namespaced facts."""
     result, rejected = {}, []
@@ -240,7 +261,8 @@ class CRSAssistant:
             "conflicts (string list), "
             "answer (cautious concise analysis), status (one of Insufficient Information, "
             "Pending Verification, Not Approved, Approved), citations "
-            "(exact citation strings from sources), dependencies "
+            "(exact citation strings from sources), paragraph_evidence (objects with citation, a short exact quote "
+            "from that paragraph and the specific claim it supports), dependencies "
             "(list of objects containing decision_id, condition_key, citation), and decisions (list of objects with decision_id, status, rationale, citations, condition_keys). Decision statuses must be undetermined, noncompliant, or requires_review. Never use compliant as an LLM decision status. "
             "If a fact is unknown, omit it from conditions. "
             "Use only the following predefined conditions: " + ", ".join(sorted(ALL_FIELDS)) + ". " 
@@ -408,192 +430,202 @@ class CRSAssistant:
         if model_mode == "azure_openai" and not model_citations and retrieved_citations:
             warnings.append("Model provided no verified citations; the displayed sources are retrieval matches only.")
         citations = model_citations or retrieved_citations
-        citation_attribution = ("model_supported" if model_citations else
+        quotes = _paragraph_quotes(suggestion.get("paragraph_evidence"), evidence, model_citations) if model_mode == "azure_openai" else []
+        citation_attribution = ("model_quote_verified" if quotes else "model_attributed" if model_citations else
                                 "retrieval_only" if retrieved_citations else "none")
 
         # If no additional facts are known, allow question-answering without mutating state.
         if status == task.YES:
             status = task.WAIT
             answer = "Verify the model-proposed finding against the cited requirements."
-        if previous is None:
-            scenario = self.engine.create(conditions) if conditions else None
-        elif conditions:
-            scenario = self.engine.revise(scenario_id, conditions, branch, expected_version)
-        else:
-            scenario = self.engine.revise(scenario_id, {"depth_ft": prior.get("depth_ft")}, branch, expected_version)
+        with self.engine.atomic():
+            if previous is None:
+                scenario = self.engine.create(conditions) if conditions else None
+            elif conditions:
+                scenario = self.engine.revise(scenario_id, conditions, branch, expected_version)
+            else:
+                scenario = self.engine.revise(scenario_id, {"depth_ft": prior.get("depth_ft")}, branch, expected_version)
 
-        flagged = []
-        if scenario:
-            scenario_id = scenario["scenario_id"]
-            version = scenario["version"]
-            changes = (scenario.get("changed_conditions", {}) if previous else conditions)
-            with self.engine._db() as db:
-                if changes:
-                    keys = list(changes)
-                    placeholders = ",".join("?" for _ in keys)
-                    affected = db.execute(
-                        "SELECT DISTINCT decision_id FROM crs_dynamic_edges WHERE "
-                        "scenario_id=? AND branch=? AND condition_key IN (" + placeholders + ")",
-                        (scenario_id, branch, *keys)).fetchall()
-                    flagged = sorted(row["decision_id"] for row in affected)
+            flagged = []
+            if scenario:
+                scenario_id = scenario["scenario_id"]
+                version = scenario["version"]
+                changes = (scenario.get("changed_conditions", {}) if previous else conditions)
+                with self.engine._db() as db:
+                    if separate:
+                        for table in ("crs_dynamic_decisions", "crs_dynamic_edges"):
+                            db.execute(f"DELETE FROM {table} WHERE scenario_id=? AND branch=?", (scenario_id, branch))
+                    if changes:
+                        keys = list(changes)
+                        placeholders = ",".join("?" for _ in keys)
+                        affected = db.execute(
+                            "SELECT DISTINCT decision_id FROM crs_dynamic_edges WHERE "
+                            "scenario_id=? AND branch=? AND condition_key IN (" + placeholders + ")",
+                            (scenario_id, branch, *keys)).fetchall()
+                        flagged = sorted(row["decision_id"] for row in affected)
+                        for name in flagged:
+                            db.execute(
+                                "UPDATE crs_dynamic_edges SET review_status=? WHERE "
+                                "scenario_id=? AND branch=? AND decision_id=?",
+                                ("needs_review", scenario_id, branch, name))
+                    # Replace an affected candidate's proposed dependency set when
+                    # a fresh assessment is available. Preserve unaffected candidates.
+                    refreshed = {c["decision_id"] for c in candidates} & set(flagged)
+                    for name in refreshed:
+                        db.execute("DELETE FROM crs_dynamic_edges WHERE scenario_id=? AND branch=? AND decision_id=?",
+                                   (scenario_id, branch, name))
+                    existing = {r["decision_id"] for r in db.execute(
+                        "SELECT decision_id FROM crs_dynamic_decisions WHERE scenario_id=? AND branch=?", (scenario_id, branch))}
+                    for edge in proposals:
+                        if edge["decision_id"] in existing and edge["decision_id"] not in flagged:
+                            continue
+                        db.execute(
+                            "INSERT OR IGNORE INTO crs_dynamic_edges VALUES (?,?,?,?,?,?,?)",
+                            (scenario_id, branch, edge["decision_id"], edge["condition_key"],
+                             edge["citation"], edge["review_status"], edge["source"]))
+                    for candidate in candidates:
+                        name = candidate["decision_id"]
+                        old = db.execute(
+                            "SELECT evaluation_count FROM crs_dynamic_decisions WHERE "
+                            "scenario_id=? AND branch=? AND decision_id=?",
+                            (scenario_id, branch, name)).fetchone()
+                        # On updates, only affected candidate decisions get reevaluated.
+                        if old and name not in flagged:
+                            continue
+                        if old:
+                            db.execute(
+                                "UPDATE crs_dynamic_decisions SET status=?, rationale=?, "
+                                "citations_json=?, evaluated_version=?, evaluation_count=?, "
+                                "review_status=? WHERE scenario_id=? AND branch=? AND decision_id=?",
+                                (candidate["status"], candidate["rationale"],
+                                 json.dumps(candidate["citations"]), version,
+                                 old["evaluation_count"] + 1, "needs_review",
+                                 scenario_id, branch, name))
+                        else:
+                            db.execute(
+                                "INSERT INTO crs_dynamic_decisions VALUES (?,?,?,?,?,?,?,?,?)",
+                                (scenario_id, branch, name, candidate["status"],
+                                 candidate["rationale"], json.dumps(candidate["citations"]),
+                                 version, 1, "proposed"))
+                    for name in set(flagged) - refreshed:
+                        db.execute("UPDATE crs_dynamic_decisions SET status=?, rationale=?, evaluated_version=?, "
+                                   "evaluation_count=evaluation_count+1 WHERE scenario_id=? AND branch=? AND decision_id=?",
+                                   ("undetermined", "A dependency changed and no grounded replacement finding was returned.",
+                                    version, scenario_id, branch, name))
                     for name in flagged:
                         db.execute(
-                            "UPDATE crs_dynamic_edges SET review_status=? WHERE "
+                            "UPDATE crs_dynamic_decisions SET review_status=? WHERE "
                             "scenario_id=? AND branch=? AND decision_id=?",
                             ("needs_review", scenario_id, branch, name))
-                # Replace an affected candidate's proposed dependency set when
-                # a fresh assessment is available. Preserve unaffected candidates.
-                refreshed = {c["decision_id"] for c in candidates} & set(flagged)
-                for name in refreshed:
-                    db.execute("DELETE FROM crs_dynamic_edges WHERE scenario_id=? AND branch=? AND decision_id=?",
-                               (scenario_id, branch, name))
-                existing = {r["decision_id"] for r in db.execute(
-                    "SELECT decision_id FROM crs_dynamic_decisions WHERE scenario_id=? AND branch=?", (scenario_id, branch))}
-                for edge in proposals:
-                    if edge["decision_id"] in existing and edge["decision_id"] not in flagged:
-                        continue
-                    db.execute(
-                        "INSERT OR IGNORE INTO crs_dynamic_edges VALUES (?,?,?,?,?,?,?)",
-                        (scenario_id, branch, edge["decision_id"], edge["condition_key"],
-                         edge["citation"], edge["review_status"], edge["source"]))
-                for candidate in candidates:
-                    name = candidate["decision_id"]
-                    old = db.execute(
-                        "SELECT evaluation_count FROM crs_dynamic_decisions WHERE "
-                        "scenario_id=? AND branch=? AND decision_id=?",
-                        (scenario_id, branch, name)).fetchone()
-                    # On updates, only affected candidate decisions get reevaluated.
-                    if old and name not in flagged:
-                        continue
-                    if old:
-                        db.execute(
-                            "UPDATE crs_dynamic_decisions SET status=?, rationale=?, "
-                            "citations_json=?, evaluated_version=?, evaluation_count=?, "
-                            "review_status=? WHERE scenario_id=? AND branch=? AND decision_id=?",
-                            (candidate["status"], candidate["rationale"],
-                             json.dumps(candidate["citations"]), version,
-                             old["evaluation_count"] + 1, "needs_review",
-                             scenario_id, branch, name))
-                    else:
-                        db.execute(
-                            "INSERT INTO crs_dynamic_decisions VALUES (?,?,?,?,?,?,?,?,?)",
-                            (scenario_id, branch, name, candidate["status"],
-                             candidate["rationale"], json.dumps(candidate["citations"]),
-                             version, 1, "proposed"))
-                for name in set(flagged) - refreshed:
-                    db.execute("UPDATE crs_dynamic_decisions SET status=?, rationale=?, evaluated_version=?, "
-                               "evaluation_count=evaluation_count+1 WHERE scenario_id=? AND branch=? AND decision_id=?",
-                               ("undetermined", "A dependency changed and no grounded replacement finding was returned.",
-                                version, scenario_id, branch, name))
-                for name in flagged:
-                    db.execute(
-                        "UPDATE crs_dynamic_decisions SET review_status=? WHERE "
-                        "scenario_id=? AND branch=? AND decision_id=?",
-                        ("needs_review", scenario_id, branch, name))
-        else:
-            version = 0
-
-        findings = [f for f in (scenario or {}).get("task_findings", []) if f["status"]]
-        decision_summary = {}
-        actions = []
-        if findings:
-            state = scenario["conditions"]
-            changes = list(changes)
-            revised = previous is None or scenario["version"] != previous["version"]
-            retired = [f for f in scenario["task_findings"] if revised and f["evaluated_version"] == version
-                       and f["previous_status"] and not f["status"]]
-            reassessed = [f for f in findings if revised and f["evaluated_version"] == version] + retired
-            changed = [f for f in reassessed if f["previous_status"] != f["status"]]
-            decision_summary = {
-                "retired": [f["decision_id"] for f in retired], "changed_conditions": changes, "reassessed": [f["decision_id"] for f in reassessed],
-                "changed": [f["decision_id"] for f in changed],
-                "unchanged": [f["decision_id"] for f in findings if f not in changed],
-            }
-            status = task.classify(findings, state, scenario["decisions"])
-            # An evacuation proposal changes the movement assessment only. Preserve
-            # a separate stop on reentry into the previously exposed location.
-            scoped_move = parsed.get("evacuation_planned") and any(f["decision_id"] == "shield_movement" for f in findings)
-            legacy_failures = [d for d in scenario["decisions"] if d["status"] == "noncompliant"
-                               and d["decision_id"] not in {"assessed_rules_summary", "inspection", "protective_system", "trench_egress"}]
-            if scoped_move and not legacy_failures and all(
-                    f["status"] != task.NO or f["decision_id"] == "worker_coverage" for f in findings):
-                status = task.WAIT
-            support = rule_sources((f["status"], f["reason"], f["citations"]) for f in findings)
-            for decision in legacy_failures:
-                paragraph = _canonical_citation(RULES[decision["decision_id"]]["regulation"])
-                support.extend(rule_sources([(None, None, [paragraph])]))
-            if status == task.YES and (conflicts or set(c for f in findings for c in f["citations"]) - {p["citation"] for p in support}):
-                status = task.WAIT
-                warnings.append("Requires Expert Review")
-            actions = [f["reason"] for f in findings if f["status"] != task.YES]
-            actions.extend(d["rationale"] for d in legacy_failures)
-            if conflicts and status != task.NO:
-                status = task.WAIT
-            if status == task.YES:
-                answer = "Approved for the defined research task under the reported conditions. " + " ".join(f["reason"] for f in findings)
             else:
-                answer = ("Movement plan only. " if scoped_move else "") + " ".join(actions)
-            indexed = {p["citation"]: p for p in support}
-            for f in findings:
-                f["paragraph_evidence"] = [
-                    {k: indexed[c][k] for k in ("id", "citation", "edition", "sha256")}
-                    for c in f["citations"] if c in indexed]
-            if support:
-                evidence = support + [p for p in evidence if p not in support]
-                citations = list(dict.fromkeys(p["citation"] for p in support))
-                citation_attribution = "rule_supported"
-        response = {
-            "task_decisions": findings, "decision_summary": decision_summary, "required_actions": actions,
-            "fact_evidence": [{"condition": f["condition"], "value": f["value"], "state_id": f["state_id"],
-                               "source_report": text, "branch": branch, "version": version}
-                              for f in (scenario or {}).get("active_states", [])
-                              if f["condition"] in decision_summary.get("changed_conditions", [])],
-            "status_criteria": task.CRITERIA, "mode": model_mode, "answer": answer, "status": status,
-            "cited_osha": [r for r in evidence if r.get("citation", r.get("id")) in citations],
-            "retrieved_osha": evidence,
-            "model_citations": model_citations,
-            "citations": citations,
-            "citation_attribution": citation_attribution,
-            "conditions_extracted": conditions,
-            "observations_extracted": {k: v for k, v in conditions.items() if k.startswith("obs_")},
-            "predefined_rules_scope": "excavation_subpart_p_only",
-            "conflicts": conflicts, "dependency_proposals": proposals, "candidate_decisions": candidates,
-            "candidate_decisions_flagged": flagged,
-            "warnings": warnings + ([retrieved["warning"]] if retrieved.get("warning") else []),
-            "scenario": scenario, "retrieval_mode": retrieved.get("mode"),
-            "disclaimer": "Approved is a research finding for the defined task. Only authorized site personnel can authorize field work.",
-        }
-        if scenario:
-            with self.engine._db() as db:
-                db.execute("INSERT INTO crs_assistant_turns VALUES (?,?,?,?,?,?,?)",
-                           (uuid4().hex, scenario_id, branch, version, text,
-                            json.dumps({k: v for k, v in response.items() if k != "scenario"}),
-                            _now()))
+                version = 0
+
+            findings = [f for f in (scenario or {}).get("task_findings", []) if f["status"]]
+            decision_summary = {}
+            actions = []
+            if findings:
+                state = scenario["conditions"]
+                changes = list(changes)
+                revised = previous is None or scenario["version"] != previous["version"]
+                retired = [f for f in scenario["task_findings"] if revised and f["evaluated_version"] == version
+                           and f["previous_status"] and not f["status"]]
+                reassessed = [f for f in findings if revised and f["evaluated_version"] == version] + retired
+                changed = [f for f in reassessed if f["previous_status"] != f["status"]]
+                decision_summary = {
+                    "retired": [f["decision_id"] for f in retired], "changed_conditions": changes, "reassessed": [f["decision_id"] for f in reassessed],
+                    "changed": [f["decision_id"] for f in changed],
+                    "unchanged": [f["decision_id"] for f in findings if f not in changed],
+                }
+                status = task.classify(findings, state, scenario["decisions"])
+                # An evacuation proposal changes the movement assessment only. Preserve
+                # a separate stop on reentry into the previously exposed location.
+                scoped_move = parsed.get("evacuation_planned") and any(f["decision_id"] == "shield_movement" for f in findings)
+                legacy_failures = [d for d in scenario["decisions"] if d["status"] == "noncompliant"
+                                   and d["decision_id"] not in {"assessed_rules_summary", "inspection", "protective_system", "trench_egress"}]
+                if scoped_move and not legacy_failures and all(
+                        f["status"] != task.NO or f["decision_id"] == "worker_coverage" for f in findings):
+                    status = task.WAIT
+                support = rule_sources((f["status"], f["reason"], f["citations"]) for f in findings)
+                for decision in legacy_failures:
+                    paragraph = _canonical_citation(RULES[decision["decision_id"]]["regulation"])
+                    support.extend(rule_sources([(None, None, [paragraph])]))
+                if status == task.YES and (conflicts or set(c for f in findings for c in f["citations"]) - {p["citation"] for p in support}):
+                    status = task.WAIT
+                    warnings.append("Requires Expert Review")
+                actions = [f["reason"] for f in findings if f["status"] != task.YES]
+                actions.extend(d["rationale"] for d in legacy_failures)
+                if conflicts and status != task.NO:
+                    status = task.WAIT
+                if status == task.YES:
+                    answer = "Approved for the defined research task under the reported conditions. " + " ".join(f["reason"] for f in findings)
+                else:
+                    answer = ("Movement plan only. " if scoped_move else "") + " ".join(actions)
+                indexed = {p["citation"]: p for p in support}
+                for f in findings:
+                    f["paragraph_evidence"] = [
+                        {k: indexed[c][k] for k in ("id", "citation", "edition", "sha256")}
+                        for c in f["citations"] if c in indexed]
+                if support:
+                    evidence = support + [p for p in evidence if p not in support]
+                    citations = list(dict.fromkeys(p["citation"] for p in support))
+                    citation_attribution = "rule_supported"
+            if not findings and status == task.NO and not quotes:
+                warnings.append("Requires Expert Review")
+                status = task.WAIT
+                answer = "Verify the identified hazard and applicable regulatory paragraph before proceeding."
+            response = {
+                "task_decisions": findings, "decision_summary": decision_summary, "required_actions": actions,
+                "fact_evidence": [{"condition": f["condition"], "value": f["value"], "state_id": f["state_id"],
+                                   "source_report": text, "branch": branch, "version": version}
+                                  for f in (scenario or {}).get("active_states", [])
+                                  if f["condition"] in decision_summary.get("changed_conditions", [])],
+                "status_criteria": task.CRITERIA, "mode": model_mode, "answer": answer, "status": status,
+                "cited_osha": [r for r in evidence if r.get("citation", r.get("id")) in citations],
+                "retrieved_osha": evidence,
+                "model_citations": model_citations, "model_paragraph_evidence": quotes,
+                "citations": citations,
+                "citation_attribution": citation_attribution,
+                "conditions_extracted": conditions,
+                "observations_extracted": {k: v for k, v in conditions.items() if k.startswith("obs_")},
+                "predefined_rules_scope": "excavation_subpart_p_only",
+                "conflicts": conflicts, "dependency_proposals": proposals, "candidate_decisions": candidates,
+                "candidate_decisions_flagged": flagged,
+                "warnings": warnings + ([retrieved["warning"]] if retrieved.get("warning") else []),
+                "scenario": scenario, "retrieval_mode": retrieved.get("mode"),
+                "disclaimer": "Approved is a research finding for the defined task. Only authorized site personnel can authorize field work.",
+            }
+            if scenario:
+                with self.engine._db() as db:
+                    db.execute("INSERT INTO crs_assistant_turns VALUES (?,?,?,?,?,?,?)",
+                               (uuid4().hex, scenario_id, branch, version, text,
+                                json.dumps({k: v for k, v in response.items() if k != "scenario"}),
+                                _now()))
         return response
 
     def fork(self, scenario_id, name, from_branch="base"):
         """Fork a hypothetical scenario with review-only model context intact."""
-        created = self.engine.branch(scenario_id, name, from_branch)
-        with self.engine._db() as db:
-            edges = db.execute(
-                "SELECT decision_id, condition_key, citation, source "
-                "FROM crs_dynamic_edges WHERE scenario_id=? AND branch=?",
-                (scenario_id, from_branch)).fetchall()
-            for edge in edges:
-                db.execute(
-                    "INSERT OR IGNORE INTO crs_dynamic_edges VALUES (?,?,?,?,?,?,?)",
-                    (scenario_id, name, edge["decision_id"], edge["condition_key"],
-                     edge["citation"], "needs_review", edge["source"]))
-            candidates = db.execute(
-                "SELECT decision_id, citations_json FROM crs_dynamic_decisions "
-                "WHERE scenario_id=? AND branch=?",
-                (scenario_id, from_branch)).fetchall()
-            for item in candidates:
-                db.execute(
-                    "INSERT OR IGNORE INTO crs_dynamic_decisions VALUES (?,?,?,?,?,?,?,?,?)",
-                    (scenario_id, name, item["decision_id"], "requires_review",
-                     "Inherited candidate from another branch. Requires independent review.",
-                     item["citations_json"], 1, 1, "needs_review"))
+        with self.engine.atomic():
+            created = self.engine.branch(scenario_id, name, from_branch)
+            with self.engine._db() as db:
+                edges = db.execute(
+                    "SELECT decision_id, condition_key, citation, source "
+                    "FROM crs_dynamic_edges WHERE scenario_id=? AND branch=?",
+                    (scenario_id, from_branch)).fetchall()
+                for edge in edges:
+                    db.execute(
+                        "INSERT OR IGNORE INTO crs_dynamic_edges VALUES (?,?,?,?,?,?,?)",
+                        (scenario_id, name, edge["decision_id"], edge["condition_key"],
+                         edge["citation"], "needs_review", edge["source"]))
+                candidates = db.execute(
+                    "SELECT decision_id, citations_json FROM crs_dynamic_decisions "
+                    "WHERE scenario_id=? AND branch=?",
+                    (scenario_id, from_branch)).fetchall()
+                for item in candidates:
+                    db.execute(
+                        "INSERT OR IGNORE INTO crs_dynamic_decisions VALUES (?,?,?,?,?,?,?,?,?)",
+                        (scenario_id, name, item["decision_id"], "requires_review",
+                         "Inherited candidate from another branch. Requires independent review.",
+                         item["citations_json"], 1, 1, "needs_review"))
         return created
 
     def history(self, scenario_id, branch="base"):

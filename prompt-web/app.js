@@ -102,7 +102,9 @@ function renderAssessment(result) {
   const actions = result.required_actions || [];
   for (const action of actions) $('#actions').append(D('li', '', action));
   if (!actions.length) $('#actions').append(D('li', '', result.status === 'Approved' ? 'Reassess if conditions change.' : 'Review the assessment with a competent person.'));
-  const cited = result.citation_attribution === 'retrieval_only' ? [] : result.cited_osha;
+  const quotes = new Set((result.model_paragraph_evidence || []).map(q => q.passage_id));
+  const cited = result.citation_attribution === 'rule_supported' ? result.cited_osha :
+      (result.cited_osha || []).filter(p => quotes.has(p.id));
   renderEvidence(cited);
 }
 $('#print-brief').addEventListener('click', () => window.print());

@@ -10,6 +10,7 @@ import os
 import re
 import sqlite3
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -367,8 +368,19 @@ class _PostgresConnection:
         return self.conn.execute(sql.replace('?', '%s'), params)
 
 
+class _ActiveTransaction:
+    def __init__(self, db):
+        self.db = db
+
+    def execute(self, sql, params=()):
+        if sql.strip() == "BEGIN IMMEDIATE":
+            return None  # The outer assistant turn already owns the write lock.
+        return self.db.execute(sql, params)
+
+
 class CRSEngine:
     def __init__(self, db_path=None):
+        self._transaction = ContextVar("crs_transaction", default=None)
         # Explicit db_path selects SQLite for tests and offline demonstrations.
         self.postgres_url = os.environ.get('CRS_DATABASE_URL') if db_path is None else None
         self.db_path = None if self.postgres_url else str(
@@ -381,7 +393,22 @@ class CRSEngine:
             db.executescript(SCHEMA)
 
     @contextmanager
+    def atomic(self):
+        """Commit the revised facts, candidate graph and audit record as one unit."""
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            token = self._transaction.set(_ActiveTransaction(db))
+            try:
+                yield
+            finally:
+                self._transaction.reset(token)
+
+    @contextmanager
     def _db(self):
+        current = self._transaction.get()
+        if current is not None:
+            yield current
+            return
         if self.postgres_url:
             try:
                 import psycopg
