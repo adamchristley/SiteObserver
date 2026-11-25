@@ -10,9 +10,11 @@ import os
 import re
 import sqlite3
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+from crs import task_decisions
 
 
 def now():
@@ -84,13 +86,15 @@ ENUM_FIELDS = {'protective_system': {'none', 'present_unverified', 'verified'}}
 BOOL_FIELDS.update({
     'shield_removed', 'worker_outside_shield', 'shield_moving',
     'workers_in_trench_during_shield_movement', 'workers_exited_before_movement',
-    'shield_rating_verified', 'shield_coverage_verified', 'shield_capacity_verified',
+    'workers_inside_moving_shield', 'shield_install_remove_vertical', 'extension_planned', 'extension_soil_verified', 'only_suitable_exit', 'ladder_reported', 'evacuation_planned', 'task_hazards_verified',
+    'protection_awaits_verification', 'shield_rating_verified', 'shield_coverage_verified', 'shield_capacity_verified',
     'shield_configuration_verified', 'ladder_distance_verified',
     'ladder_distance_conflicted', 'inspection_after_change',
     'competent_person_cave_in_indication',
 })
 NUMBER_FIELDS.update({
-    'shield_count', 'ladder_lateral_distance_ft', 'excavation_length_ft',
+    'work_area',
+    'planned_depth_ft', 'shield_count', 'ladder_lateral_distance_ft', 'excavation_length_ft',
     'excavation_width_ft',
 })
 ENUM_FIELDS['soil_type'] = {'A', 'B', 'C', 'unknown'}
@@ -298,6 +302,10 @@ CREATE TABLE IF NOT EXISTS branches (
     fork_version INTEGER, state_json TEXT NOT NULL, version INTEGER NOT NULL,
     PRIMARY KEY (scenario_id, branch)
 );
+CREATE TABLE IF NOT EXISTS task_findings (
+    scenario_id TEXT NOT NULL, branch TEXT NOT NULL, name TEXT NOT NULL, body TEXT NOT NULL,
+    PRIMARY KEY (scenario_id, branch, name)
+);
 CREATE TABLE IF NOT EXISTS state_facts (
     state_id TEXT PRIMARY KEY, scenario_id TEXT NOT NULL, branch TEXT NOT NULL,
     key TEXT NOT NULL, value_json TEXT NOT NULL, version INTEGER NOT NULL,
@@ -360,8 +368,19 @@ class _PostgresConnection:
         return self.conn.execute(sql.replace('?', '%s'), params)
 
 
+class _ActiveTransaction:
+    def __init__(self, db):
+        self.db = db
+
+    def execute(self, sql, params=()):
+        if sql.strip() == "BEGIN IMMEDIATE":
+            return None  # The outer assistant turn already owns the write lock.
+        return self.db.execute(sql, params)
+
+
 class CRSEngine:
     def __init__(self, db_path=None):
+        self._transaction = ContextVar("crs_transaction", default=None)
         # Explicit db_path selects SQLite for tests and offline demonstrations.
         self.postgres_url = os.environ.get('CRS_DATABASE_URL') if db_path is None else None
         self.db_path = None if self.postgres_url else str(
@@ -374,7 +393,22 @@ class CRSEngine:
             db.executescript(SCHEMA)
 
     @contextmanager
+    def atomic(self):
+        """Commit the revised facts, candidate graph and audit record as one unit."""
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            token = self._transaction.set(_ActiveTransaction(db))
+            try:
+                yield
+            finally:
+                self._transaction.reset(token)
+
+    @contextmanager
     def _db(self):
+        current = self._transaction.get()
+        if current is not None:
+            yield current
+            return
         if self.postgres_url:
             try:
                 import psycopg
@@ -517,7 +551,10 @@ class CRSEngine:
                 'regulations': regulatory_evidence,
                 'evaluated_version': d['evaluated_version'], 'evaluation_count': d['evaluation_count'],
             })
+        findings = [json.loads(r["body"]) for r in db.execute(
+            "SELECT body FROM task_findings WHERE scenario_id=? AND branch=? ORDER BY name", (sid, branch))]
         return {
+            'task_findings': findings,
             'scenario_id': sid, 'branch': branch, 'parent_branch': row['parent_branch'],
             'version': row['version'], 'conditions': json.loads(row['state_json']),
             'active_states': [{'condition': r['key'], 'value': json.loads(r['value_json']),
@@ -538,6 +575,7 @@ class CRSEngine:
             db.execute('INSERT INTO state_events VALUES (?,?,?,?,?,?,?)',
                        (uuid4().hex, sid, 'base', 'ADD', 1, json.dumps(state), now()))
             self._evaluate(db, sid, 'base', 1, state, sorted(RULES))
+            task_decisions.update(db, sid, 'base', 1, state, state)
             return self._view(db, sid, 'base', sorted(RULES))
 
     def get(self, sid, branch='base'):
@@ -561,6 +599,7 @@ class CRSEngine:
                     changed[key] = {'previous': state.get(key), 'current': value}
                     state[key] = value
             if not changed:
+                task_decisions.update(db, sid, branch, row["version"], state, {})
                 return self._view(db, sid, branch, [])
             version = row['version'] + 1
             db.execute('UPDATE branches SET state_json=?, version=? WHERE scenario_id=? AND branch=?',
@@ -591,6 +630,7 @@ class CRSEngine:
                         pending.append(child['decision_id'])
             ids = sorted(ids)
             self._evaluate(db, sid, branch, version, state, ids)
+            task_decisions.update(db, sid, branch, version, state, changed)
             result = self._view(db, sid, branch, ids)
             result['changed_conditions'] = changed
             result['unchanged_decisions'] = [r for r in RULES if r not in ids]
@@ -613,6 +653,7 @@ class CRSEngine:
                        (uuid4().hex, sid, name, 'BRANCH', 1,
                         json.dumps({'from_branch': from_branch, 'from_version': source['version']}), now()))
             self._evaluate(db, sid, name, 1, state, sorted(RULES))
+            task_decisions.update(db, sid, name, 1, state, state)
             return self._view(db, sid, name, sorted(RULES))
 
     def history(self, sid, branch='base'):

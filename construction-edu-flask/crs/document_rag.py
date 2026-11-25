@@ -156,13 +156,17 @@ class OSHAIndex:
         self.reference = []
         # The supplied July 2025 CFR is a separate, auditable research baseline.
         # Loading it does not overwrite the newer primary OSHA/eCFR snapshot.
-        if path is None and "CRS_OSHA_CORPUS_PATH" not in os.environ:
+        if not self.snapshot and path is None and "CRS_OSHA_CORPUS_PATH" not in os.environ:
             for filename in sorted(REFERENCE_2025_DIR.glob("*.json")):
                 snapshot = json.loads(filename.read_text(encoding="utf-8"))
                 if snapshot.get("edition") != "2025-07-01":
                     raise ValueError(f"Unexpected historical reference edition: {filename}")
                 self.reference.extend(snapshot.get("chunks", []))
         self.docs = self.docs + self.reference
+        self.paragraphs = {}
+        for doc in self.docs:
+            if doc.get("edition") == "2025-07-01" and "(" in doc["citation"]:
+                self.paragraphs.setdefault(doc["citation"], []).append(doc)
         self.tf = [Counter(_tokens(" ".join(str(d.get(k) or "") for k in ("citation", "title", "subpart_title", "text")))) for d in self.docs]
         self.df = Counter()
         for freq in self.tf:
@@ -170,7 +174,7 @@ class OSHAIndex:
         self.avgdl = sum(map(lambda v: sum(v.values()), self.tf)) / (len(self.tf) or 1)
 
     def status(self):
-        return {"ready": bool(self.docs), "mode": "osha_source_text" if self.docs else "catalog_only",
+        return {"edition": (self.snapshot or {}).get("edition"), "archive_sha256": (self.snapshot or {}).get("archive_sha256"), "ready": bool(self.docs), "mode": "osha_source_text" if self.docs else "catalog_only",
                 "chunks": len(self.docs), "source_pages": len(self.snapshot["source_pages"]) if self.snapshot else 0,
                 "reference_2025_chunks": len(self.reference),
                 "reference_2025_edition": "2025-07-01" if self.reference else None,
@@ -225,7 +229,7 @@ class OSHAIndex:
                 "retrieved_at": self.snapshot.get("retrieved_at") if self.snapshot else None,
                 "scope": self.snapshot.get("scope") if self.snapshot else None,
                 "filtered_subpart": subpart,
-                "warning": "Source snapshots require edition and expert applicability checks. Historical 2025 excerpts are separately labeled."}
+                "warning": "Verify the edition and applicability of each source passage."}
 
 
 

@@ -122,7 +122,8 @@ def test_bad_model_fields_and_fake_citations_do_not_get_persisted(tmp_path):
 
     assistant = CRSAssistant(engine, index=index, infer=malicious_llm)
     response = assistant.analyze("6 foot trench")
-    assert response["status"] == "Requires Expert Review"
+    assert response["status"] == "Insufficient Information"
+    assert "Requires Expert Review" in response["warnings"]
     assert "confirmed_safe" not in response["scenario"]["conditions"]
     assert not response["model_citations"]
     assert response["citation_attribution"] == "retrieval_only"
@@ -201,7 +202,7 @@ def test_model_normalized_citation_and_unknown_citation_rejected(tmp_path):
                 "citations": ["29 CFR § 1926.652(a)(1)", "29 CFR 1926.999(z)"]}
     result = CRSAssistant(engine, index=index, infer=cites).analyze(
         "Trench cave-in protective system depth six feet")
-    assert result["citation_attribution"] == "model_supported"
+    assert result["citation_attribution"] == "model_attributed"
     assert result["model_citations"] == ["1926.652(a)(1)"]
     assert "1926.999(z)" not in result["citations"]
 
